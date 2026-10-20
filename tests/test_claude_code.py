@@ -6,7 +6,8 @@ import json
 import os
 from pathlib import Path
 
-from biblioteca.connectors.claude_code import ClaudeCodeConnector, _project_from_cwd
+from biblioteca.connectors.base import project_from_cwd as _project_from_cwd
+from biblioteca.connectors.claude_code import ClaudeCodeConnector
 from biblioteca.store import ConnectorState
 
 NOW = 2_000_000_000.0
@@ -139,6 +140,7 @@ def test_project_from_cwd() -> None:
     assert _project_from_cwd("/w/projects") is None
     assert _project_from_cwd(None) is None
     assert _project_from_cwd("/w/.tool/projects/-/memory") is None
+    assert _project_from_cwd("/w/projects/app-wt/T-1", {"app-wt": "app"}) == "app"
 
 
 def test_trivial_sessions_are_skipped(tmp_path: Path) -> None:

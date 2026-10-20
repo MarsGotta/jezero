@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import PurePath
 from typing import Any, Protocol
 
 from ..store import ConnectorState
@@ -76,3 +78,26 @@ def segment(
     if current:
         segments.append(current)
     return segments
+
+
+_UUIDISH = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-")
+_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$", re.IGNORECASE)
+_IGNORED_DIR_NAMES = {"projects", "worktrees", "src", "app"}
+
+
+def project_from_cwd(cwd: str | None, aliases: dict[str, str] | None = None) -> str | None:
+    """`.../projects/<name>/...` -> `<name>`, skipping ids and generic folder names.
+
+    `aliases` maps folder names to project slugs (for example a worktrees folder).
+    """
+    if not cwd:
+        return None
+    parts = PurePath(cwd).parts
+    for i, part in enumerate(parts[:-1]):
+        if part == "projects":
+            name = parts[i + 1]
+            if not _NAME.match(name) or _UUIDISH.match(name) or name in _IGNORED_DIR_NAMES:
+                continue
+            name = name.lower()
+            return (aliases or {}).get(name, name)
+    return None

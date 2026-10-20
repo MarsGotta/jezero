@@ -36,7 +36,7 @@ CONNECTOR_TYPES: dict[str, ConnectorType] = {
         ),
         ConnectorType(
             "codex",
-            "planned",
+            "available",
             "OpenAI Codex CLI session transcripts (*.jsonl under a sessions directory).",
         ),
         ConnectorType(

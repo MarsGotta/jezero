@@ -92,7 +92,12 @@ name = "agent-codex"
 type = "codex"
 interval_minutes = 15
 [connectors.options]
-sessions_dir = "/path/to/.codex/sessions"
+sessions_dir = "~/.codex/sessions"
+settle_minutes = 30
+include_subagents = false              # Codex's own sub-agents (reviewers, spawned helpers)
+skip_cwd_globs = ["*/scratch-benchmarks*"]   # sessions to ignore by working directory
+min_chars = 400
+# project_aliases = { "my-app-wt" = "my-app" }   # map folder names to project slugs
 
 [[connectors]]
 # Receives sessions pushed by small emitters on other devices.
