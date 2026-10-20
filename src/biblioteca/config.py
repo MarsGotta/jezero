@@ -237,6 +237,27 @@ def resolve_config_path(explicit: str | os.PathLike[str] | None = None) -> Path:
     return Path.cwd() / DEFAULT_CONFIG_NAME
 
 
+def load_env_file(path: Path) -> list[str]:
+    """Load KEY=VALUE lines from a dotenv-style file into os.environ.
+
+    Existing environment variables win, so a service manager can always override the file.
+    Returns the names that were loaded (never the values).
+    """
+    loaded: list[str] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.removeprefix("export ").partition("=")
+        key, value = key.strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key and value and key not in os.environ:
+            os.environ[key] = value
+            loaded.append(key)
+    return loaded
+
+
 def load_config(path: str | os.PathLike[str] | None = None) -> Config:
     config_path = resolve_config_path(path)
     if not config_path.is_file():
@@ -244,6 +265,9 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
             f"config not found at {config_path}. Copy biblioteca.example.toml to "
             f"{DEFAULT_CONFIG_NAME} or set {CONFIG_ENV_VAR}."
         )
+    env_file = config_path.parent / ".env"
+    if env_file.is_file():
+        load_env_file(env_file)
     with config_path.open("rb") as fh:
         data = tomllib.load(fh)
     config = Config.model_validate(data)

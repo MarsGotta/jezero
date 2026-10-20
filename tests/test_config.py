@@ -67,3 +67,18 @@ def test_env_report_never_contains_values(monkeypatch) -> None:
     report = config.env_report()
     assert report["BIBLIOTECA_TOKEN_CODING_AGENT"] is True
     assert "super-secret-value" not in repr(report)
+
+
+def test_dotenv_next_to_config_is_loaded_without_overriding(tmp_path, monkeypatch) -> None:
+    from biblioteca.config import load_env_file
+
+    monkeypatch.delenv("BIB_TEST_A", raising=False)
+    monkeypatch.setenv("BIB_TEST_B", "from-environment")
+    env = tmp_path / ".env"
+    env.write_text('# comment\nBIB_TEST_A="quoted value"\nexport BIB_TEST_B=from-file\nEMPTY=\n')
+    assert load_env_file(env) == ["BIB_TEST_A"]
+    import os
+
+    assert os.environ["BIB_TEST_A"] == "quoted value"
+    assert os.environ["BIB_TEST_B"] == "from-environment"
+    monkeypatch.delenv("BIB_TEST_A")

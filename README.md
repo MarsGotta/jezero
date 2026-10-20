@@ -86,7 +86,9 @@ documents every field.
 
 **Secrets never go in the config.** Fields ending in `_env` hold the *name* of an
 environment variable. Inline secrets in connector options are rejected at load time.
-`check-config` reports which variables are set without printing their values.
+A git-ignored `.env` file next to the config is loaded automatically; variables already
+set in the environment take precedence. `check-config` reports which variables are set
+without printing their values.
 
 ## Security model
 
