@@ -45,6 +45,11 @@ CONNECTOR_TYPES: dict[str, ConnectorType] = {
             "OpenCode sessions from its SQLite store (read-only).",
         ),
         ConnectorType(
+            "antigravity",
+            "available",
+            "Antigravity CLI conversations from its local store (read-only).",
+        ),
+        ConnectorType(
             "paperclip",
             "available",
             "Paperclip issues with comments, documents and decisions (read-only API).",

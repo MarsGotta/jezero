@@ -128,6 +128,19 @@ min_chars = 400
 # user_prompt_markers / user_prompt_drop_lines work as in the codex connector
 
 [[connectors]]
+# Antigravity CLI conversations. The store is protobuf without a published schema: the
+# connector reads only the user text, the agent's replies and a one-line summary per tool
+# call, and skips whatever it does not recognise.
+name = "agent-antigravity"
+type = "antigravity"
+enabled = false
+interval_minutes = 15
+[connectors.options]
+data_dir = "~/.gemini/antigravity-cli"
+skip_dir_globs = ["/tmp/*"]
+min_chars = 400
+
+[[connectors]]
 # Paperclip (agent orchestrator): issues with comments, documents and board decisions.
 # Read-only GET requests; an agent API key scoped to one company is enough.
 name = "paperclip"

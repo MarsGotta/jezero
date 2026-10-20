@@ -38,3 +38,6 @@
   already stored, without calling the model.
 - `jezero resummarize --ids ... | --ids-file FILE`: summarise stored items again from
   their kept original text (for example after setting `summarizer.output_language`).
+- Antigravity CLI connector: reads the per-conversation SQLite store through a minimal
+  protobuf wire reader (user text, agent replies, one line per tool call with its summary);
+  unknown or malformed steps are skipped.
