@@ -10,7 +10,7 @@ import httpx
 from jezero import cli
 from jezero.config import Config
 from jezero.store import ConnectorState, Store
-from jezero.watchdog import alert, evaluate
+from jezero.watchdog import alert, evaluate, heartbeat
 
 NOW = datetime(2033, 5, 18, 12, 0, tzinfo=UTC)
 
@@ -75,3 +75,17 @@ def test_run_isolates_failures_and_respects_due(tmp_path, monkeypatch, capsys) -
     # Just ran: nothing is due.
     assert cli.main(["run", "--due"]) == 0
     assert capsys.readouterr().out == ""
+
+
+def test_heartbeat_reports_overall_status(tmp_path, monkeypatch) -> None:
+    config, store = make(tmp_path, heartbeat_url_env="TEST_PUSH")
+    seen: list[httpx.Request] = []
+    transport = httpx.MockTransport(lambda r: seen.append(r) or httpx.Response(200))
+    report = evaluate(config, store, now=NOW)
+    assert heartbeat(config, report, transport=transport) is None  # env var not set
+    monkeypatch.setenv("TEST_PUSH", "http://push.example.invalid/api/push/abc")
+    assert heartbeat(config, report, transport=transport) == "down"
+    assert seen[-1].url.params["status"] == "down"
+    assert "old stale" in seen[-1].url.params["msg"]
+    healthy = [e for e in report if e.healthy]
+    assert heartbeat(config, healthy, transport=transport) == "up"

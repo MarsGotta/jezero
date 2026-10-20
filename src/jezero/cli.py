@@ -11,6 +11,7 @@ from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import httpx
 from pydantic import ValidationError
 
 from . import __version__
@@ -176,7 +177,7 @@ def _run_selected(
 
 
 def cmd_health(config: Config, _: argparse.Namespace) -> int:
-    from .watchdog import alert, evaluate
+    from .watchdog import alert, evaluate, heartbeat
 
     store = _store(config)
     store.init()
@@ -186,6 +187,13 @@ def cmd_health(config: Config, _: argparse.Namespace) -> int:
     sent = alert(config, store, report)
     if sent:
         print(json.dumps({"alerted": sent}))
+    try:
+        pinged = heartbeat(config, report)
+    except httpx.HTTPError as exc:  # the monitor will notice the missing ping anyway
+        pinged = None
+        print(json.dumps({"heartbeat_error": type(exc).__name__}))
+    if pinged:
+        print(json.dumps({"heartbeat": pinged}))
     return 0 if all(e.healthy for e in report) else 1
 
 

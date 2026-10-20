@@ -4,7 +4,10 @@ A connector is *stale* when it has not finished a successful run for longer than
 `watchdog.max_silence_hours` (or has never succeeded although it is enabled). `jezero
 health` reports every enabled connector and exits non-zero if any is stale or failing, so
 it can run from a timer. If `watchdog.alert_webhook_env` names a variable holding a URL,
-a JSON alert is POSTed there, at most once per `realert_hours` per connector.
+a JSON alert is POSTed there, at most once per `realert_hours` per connector. If
+`watchdog.heartbeat_url_env` is set, every check also pings that push URL with
+`status=up|down`: the monitor on the other end alerts when the pings stop, which also
+covers the scheduler itself dying.
 """
 
 from __future__ import annotations
@@ -103,3 +106,26 @@ def alert(
                 store.set_meta(key, now.isoformat())
                 sent.append(entry.connector)
     return sent
+
+
+def heartbeat(
+    config: Config,
+    report: list[ConnectorHealth],
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> str | None:
+    """Ping the push URL with the overall status. Returns the status sent, or None."""
+    env = config.watchdog.heartbeat_url_env
+    url = os.environ.get(env) if env else None
+    if not url:
+        return None
+    bad = [e for e in report if not e.healthy]
+    status = "down" if bad else "up"
+    msg = (
+        "; ".join(f"{e.connector} {e.status}" for e in bad)
+        if bad
+        else f"{len(report)} connectors ok"
+    )
+    with httpx.Client(timeout=15, transport=transport) as http:
+        resp = http.get(url, params={"status": status, "msg": msg[:250], "ping": ""})
+    return status if resp.status_code < 400 else None

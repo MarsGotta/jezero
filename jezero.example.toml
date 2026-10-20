@@ -127,3 +127,4 @@ extra_patterns = []
 max_silence_hours = 24
 # alert_webhook_env = "JEZERO_ALERT_WEBHOOK_URL"   # receives {"text": ..., "connector": ...}
 realert_hours = 12                                 # repeat an alert at most this often
+# heartbeat_url_env = "JEZERO_HEARTBEAT_URL"       # push URL pinged with status=up|down

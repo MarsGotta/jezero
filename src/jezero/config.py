@@ -183,6 +183,9 @@ class WatchdogConfig(_Strict):
     """Env var holding a webhook URL that receives a JSON alert."""
     realert_hours: float = Field(12.0, gt=0)
     """Repeat an alert for the same connector at most this often."""
+    heartbeat_url_env: str | None = None
+    """Env var holding a push URL (for example an Uptime Kuma push monitor). Every health
+    check calls it with status=up or status=down, so silence itself becomes an alert."""
 
 
 class Config(_Strict):
@@ -228,6 +231,8 @@ class Config(_Strict):
         names += [c.token_env for c in self.clients if c.token_env]
         if self.watchdog.alert_webhook_env:
             names.append(self.watchdog.alert_webhook_env)
+        if self.watchdog.heartbeat_url_env:
+            names.append(self.watchdog.heartbeat_url_env)
         for conn in self.connectors:
             names += [str(v) for k, v in _walk_items(conn.options) if k.endswith("_env")]
         return {name: bool(os.environ.get(name)) for name in dict.fromkeys(names)}

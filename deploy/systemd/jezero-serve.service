@@ -1,0 +1,19 @@
+# Jezero MCP server (read-only search for your agents).
+# Install as a user unit (see deploy/README.md). Adjust the paths if the checkout lives
+# somewhere else. Put a TLS reverse proxy in front of it to reach it from other machines.
+[Unit]
+Description=Jezero: MCP server
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/jezero
+ExecStart=%h/jezero/.venv/bin/jezero serve
+Restart=on-failure
+RestartSec=5
+# The server only reads the library; keep it away from everything else.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
