@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -213,3 +214,37 @@ def test_parse_tolerates_malformed_atoms() -> None:
     assert out.questions == ["q1", "q2"]
     flat = _parse({"title": "t", "summary": "s", "atoms": '["fact: a"]', "project": None})
     assert [(a.kind, a.text) for a in flat.atoms] == [("fact", "a")]
+
+
+def test_resummarize_rewrites_summary_and_keeps_identity(env, monkeypatch) -> None:
+    from jezero.models import NewItem
+    from jezero.pipeline import resummarize_items
+
+    config, store, _ = env
+    old = NewItem(
+        source="agent-hermes",
+        external_id="s-old#0",
+        occurred_at=datetime(2033, 1, 1, tzinfo=UTC),
+        title="Viejo",
+        summary="Resumen viejo",
+        questions=[],
+        atoms=[],
+        project="keep-me",
+        original="user: how do we roll back the deploy?",
+        original_ref="hermes-session:s-old",
+        content_hash="h1",
+    )
+    store.upsert_many([old])
+    item_id = store.search("Viejo")[0].item.id
+    calls: list[str] = []
+    summarizer = Summarizer(
+        SummarizerConfig(model="fake-haiku", api_key_env="TEST_SUMMARIZER_KEY"),
+        transport=fake_anthropic(calls),
+    )
+    report = asyncio.run(resummarize_items(config, store, [item_id, 9999], summarizer=summarizer))
+    assert (report.docs, report.stored, report.failed) == (1, 1, 0)
+    assert "roll back the deploy" in calls[0]
+    fresh = store.get(item_id)
+    assert fresh is not None
+    assert fresh.title == "Rollback of the deploy"
+    assert (fresh.external_id, fresh.project, fresh.content_hash) == ("s-old#0", "keep-me", "h1")

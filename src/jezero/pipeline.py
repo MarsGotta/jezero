@@ -181,3 +181,62 @@ async def run_connector(
         )
     )
     return report
+
+
+async def resummarize_items(
+    config: Config,
+    store: Store,
+    item_ids: list[int],
+    *,
+    summarizer: Summarizer | None = None,
+) -> RunReport:
+    """Summarise stored items again from their kept original text (for example after
+    changing `summarizer.output_language`). Source, ids, dates and project stay."""
+    report = RunReport(connector="resummarize")
+    summarizer = summarizer or Summarizer(
+        config.summarizer, known_projects=config.summarizer.known_projects
+    )
+    items = [i for i in (store.get(n) for n in item_ids) if i is not None and i.original]
+    report.docs = len(items)
+    report.input_chars = sum(len(i.original or "") for i in items)
+    for start in range(0, len(items), CHUNK):
+        chunk = items[start : start + CHUNK]
+        results = await asyncio.gather(
+            *(
+                summarizer.summarize(
+                    item.original or "",
+                    context=f"source={item.source} project={item.project or '-'}",
+                )
+                for item in chunk
+            ),
+            return_exceptions=True,
+        )
+        fresh: list[NewItem] = []
+        for item, result in zip(chunk, results, strict=True):
+            if isinstance(result, BaseException):
+                report.failed += 1
+                report.errors.append(f"{item.id}: {result}")
+                if not isinstance(result, SummarizerError):
+                    raise result
+                continue
+            fresh.append(
+                NewItem(
+                    source=item.source,
+                    external_id=item.external_id,
+                    occurred_at=item.occurred_at,
+                    title=result.title,
+                    summary=result.summary,
+                    questions=result.questions,
+                    atoms=result.atoms,
+                    project=item.project or result.project,
+                    account=item.account,
+                    original=item.original,
+                    original_ref=item.original_ref,
+                    trust=item.trust,
+                    content_hash=item.content_hash,
+                )
+            )
+        report.stored += sum(1 for o in store.upsert_many(fresh, force=True) if o == "updated")
+    report.input_tokens = summarizer.usage.input_tokens
+    report.output_tokens = summarizer.usage.output_tokens
+    return report

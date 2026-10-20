@@ -209,6 +209,32 @@ def cmd_retag(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resummarize(config: Config, args: argparse.Namespace) -> int:
+    """Summarise stored items again from their original text (ids from a file or a list)."""
+    import asyncio
+    import fcntl
+
+    from .pipeline import resummarize_items
+
+    raw = args.ids.split(",") if args.ids else []
+    if args.ids_file:
+        raw += Path(args.ids_file).read_text().split()
+    ids = sorted({int(x) for x in raw if x.strip()})
+    if not ids:
+        print("error: no item ids given", file=sys.stderr)
+        return 2
+    store = _store(config)
+    with config.db_path.with_suffix(".run.lock").open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(json.dumps({"skipped": "another run is in progress"}))
+            return 0
+        report = asyncio.run(resummarize_items(config, store, ids))
+    print(json.dumps(report.to_dict(), ensure_ascii=False))
+    return 1 if report.failed else 0
+
+
 def cmd_health(config: Config, _: argparse.Namespace) -> int:
     from .watchdog import alert, evaluate, heartbeat
 
@@ -280,6 +306,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--due", action="store_true", help="only connectors whose interval_minutes has elapsed"
     )
     p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("resummarize", help="summarise stored items again from their original")
+    p.add_argument("--ids", help="comma-separated item ids")
+    p.add_argument("--ids-file", help="file with item ids, one per line")
+    p.set_defaults(fn=cmd_resummarize)
 
     p = sub.add_parser("retag", help="re-apply project hints from the source, without the LLM")
     p.add_argument("--connector", required=True)

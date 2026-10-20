@@ -194,7 +194,8 @@ class Store:
     def upsert(self, item: NewItem) -> UpsertOutcome:
         return self.upsert_many([item])[0]
 
-    def upsert_many(self, items: Iterable[NewItem]) -> list[UpsertOutcome]:
+    def upsert_many(self, items: Iterable[NewItem], *, force: bool = False) -> list[UpsertOutcome]:
+        """Insert or update by (source, external_id). Same hash is a no-op unless `force`."""
         outcomes: list[UpsertOutcome] = []
         now = _now()
         with self._write() as con:
@@ -228,7 +229,7 @@ class Store:
                     )
                     item_id = cur.lastrowid
                     outcomes.append("inserted")
-                elif row["content_hash"] == item.content_hash:
+                elif row["content_hash"] == item.content_hash and not force:
                     outcomes.append("unchanged")
                     continue
                 else:

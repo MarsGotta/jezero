@@ -36,3 +36,5 @@
 - A project hint from the source (working directory, project field) now wins over the
   model's guess. `jezero retag --connector NAME [--dry-run]` re-applies the hints to items
   already stored, without calling the model.
+- `jezero resummarize --ids ... | --ids-file FILE`: summarise stored items again from
+  their kept original text (for example after setting `summarizer.output_language`).
