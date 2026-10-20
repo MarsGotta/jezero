@@ -49,6 +49,7 @@ ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S104", "S105", "S106", "S108", "S603", "S607"]
+"scripts/**" = ["S603", "S607"]  # fixed git invocations, no user input
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -105,7 +105,7 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 ```bash
 uv sync
 uv run pytest
-uv run ruff check src tests
+uv run ruff check src tests scripts
 uv run ruff format --check src tests
 git config core.hooksPath .githooks   # enables the privacy pre-commit check
 python3 scripts/privacy_check.py --all

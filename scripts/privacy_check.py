@@ -26,10 +26,19 @@ SKIP_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".lock"}
 ALLOW_MARKER = "privacy: allow"
 
 BUILTIN = [
-    ("home directory path", re.compile(r"/(?:home|Users)/(?!user\b|you\b|me\b)[a-z][a-z0-9_-]+/")),
-    ("CGNAT/tailnet address", re.compile(r"\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b")),
+    (
+        "home directory path",
+        re.compile(r"/(?:home|Users)/(?!user\b|you\b|me\b)[a-z][a-z0-9_-]+/"),
+    ),
+    (
+        "CGNAT/tailnet address",
+        re.compile(r"\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b"),
+    ),
     ("private LAN address", re.compile(r"\b(?:192\.168|10\.\d{1,3})\.\d{1,3}\.\d{1,3}\b")),
-    ("credential", re.compile(r"\b(?:sk-ant-|ghp_|github_pat_|xox[abposr]-|AKIA)[A-Za-z0-9_\-]{8,}")),
+    (
+        "credential",
+        re.compile(r"\b(?:sk-ant-|ghp_|github_pat_|xox[abposr]-|AKIA)[\w\-]{8,}"),
+    ),
 ]
 
 
