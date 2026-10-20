@@ -10,6 +10,8 @@ Type=simple
 WorkingDirectory=%h/jezero
 ExecStart=%h/jezero/.venv/bin/jezero serve
 Restart=on-failure
+# Clients keep streams open; do not wait the default 90 s for them on restart.
+TimeoutStopSec=10
 RestartSec=5
 # The server only reads the library; keep it away from everything else.
 NoNewPrivileges=true

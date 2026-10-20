@@ -113,3 +113,33 @@ def test_get_item_and_timeline(server_url: str) -> None:
     assert full["found"] and full["item"]["title"] == "Mail thread"
     timeline = call(server_url, AGENT_TOKEN, "timeline", {})
     assert [i["source"] for i in timeline["items"]] == ["agent-x"]
+
+
+def test_later_finds_the_decision_that_replaced_an_earlier_one(tmp_path) -> None:
+    from jezero.server import later_items
+
+    store = Store(tmp_path / "lib.db")
+    store.init()
+    store.upsert(
+        make_item("p1", "Launch plan rev 4: shop moves to shop.example.org", "move", days_ago=3)
+    )
+    store.upsert(
+        make_item("p2", "Launch plan rev 6: the shop stays on shop.example", "stay", days_ago=1)
+    )
+    store.upsert(make_item("x1", "Unrelated: printer driver", "other", days_ago=0.5))
+    store.upsert(
+        make_item("o1", "Launch plan in another project", "x", days_ago=0.5, project="other")
+    )
+    store.upsert(make_item("old", "Launch plan rev 1", "first", days_ago=9))
+    for n, words in enumerate(["kernel panic", "invoice totals", "garden pump", "font sizes"]):
+        store.upsert(make_item(f"f{n}", words, words, days_ago=20, project="filler"))
+    by_title = {i.external_id: i for i in store.timeline(limit=10)}
+    newer, how = later_items(store, by_title["p1"])
+    assert ([i.external_id for i in newer], how) == (["p2"], "subject")
+    # Nothing newer on the subject: the project's newer items, flagged as such.
+    newer, how = later_items(store, by_title["p2"])
+    assert ([i.external_id for i in newer], how) == (["x1"], "project_timeline")
+    assert later_items(store, by_title["p1"], allowed_sources=["mail-*"]) == (
+        [],
+        "project_timeline",
+    )

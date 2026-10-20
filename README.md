@@ -76,6 +76,7 @@ claude mcp add --transport http jezero http://127.0.0.1:8765/mcp \
 | `search` | BM25 over titles, summaries, questions and atoms, boosted by recency. Filters: `project`, `source`, `since`. |
 | `get_item` | One item in full; the original text only on request. |
 | `timeline` | Items in reverse chronological order for a project, source or period. |
+| `later` | Newer items in the same project on the same subject as a given item, newest first. Agents are told to call it before relying on a decision, plan or status. |
 | `list_sources` | Sources visible to the calling client, with counts and latest date. |
 
 All tools are annotated read-only. Each client sees only the sources its config entry

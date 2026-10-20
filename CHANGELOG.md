@@ -45,3 +45,10 @@
   holds the cursor, so `jezero health` (and the heartbeat) shows the connector as failing
   until the cause is fixed. The Antigravity connector warns when a conversation has steps
   but nothing in it can be read, which is how a format change shows up.
+- MCP tool `later(item_id, query?)`: newer items in the same project on the same subject,
+  newest first, flagged `matched_by=subject` or `project_timeline` (fallback). The server
+  instructions now tell agents that decisions change and to check `later` before answering
+  with a decision, plan or status. Each item summarises one session, so nothing else marks
+  a decision as superseded.
+- The MCP server unit stops within 10 s: clients keep streams open and the default 90 s
+  wait made restarts slow.
