@@ -40,6 +40,11 @@ CONNECTOR_TYPES: dict[str, ConnectorType] = {
             "OpenAI Codex CLI session transcripts (*.jsonl under a sessions directory).",
         ),
         ConnectorType(
+            "paperclip",
+            "available",
+            "Paperclip issues with comments, documents and decisions (read-only API).",
+        ),
+        ConnectorType(
             "receiver",
             "planned",
             "HTTP endpoint that accepts sessions pushed by small emitters on other devices.",

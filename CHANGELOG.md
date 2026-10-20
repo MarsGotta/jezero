@@ -24,3 +24,7 @@
 - Codex connector: `sessions_dir` accepts a glob (one connector for every agent home an
   orchestrator creates) and `user_prompt_markers` / `user_prompt_drop_lines` strip the
   agent instructions an orchestrator repeats in every prompt.
+- Paperclip connector: each issue with its description, comments (system notices and
+  deleted comments skipped), documents and answered questions, read through the API with
+  GET requests only. Entries are ordered by creation time so segments stay stable as an
+  issue grows; quiet issues only.

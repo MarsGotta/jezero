@@ -114,6 +114,21 @@ user_prompt_markers = ['^## Wake Payload']
 user_prompt_drop_lines = ['^Execution contract:']
 
 [[connectors]]
+# Paperclip (agent orchestrator): issues with comments, documents and board decisions.
+# Read-only GET requests; an agent API key scoped to one company is enough.
+name = "paperclip"
+type = "paperclip"
+enabled = false
+interval_minutes = 15
+[connectors.options]
+api_url = "http://127.0.0.1:3100/api"
+api_key_env = "JEZERO_PAPERCLIP_API_KEY"
+# company_ids = ["..."]          # default: the company of the key's agent
+board_name = "board"              # how human comments are attributed
+settle_minutes = 30               # wait until an issue is quiet before summarising it
+# project_map = { "Shop app" = "shop" }   # Paperclip project name -> project slug
+
+[[connectors]]
 # Receives sessions pushed by small emitters on other devices.
 name = "agent-devices"
 type = "receiver"

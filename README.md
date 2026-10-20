@@ -22,7 +22,7 @@ it so they can be picked up later. That is the whole idea of this project.
 ```
 
 **Status: pre-alpha.** Storage, search, the MCP server, configuration, the summarizer,
-connectors for Hermes Agent, Claude Code and Codex, unattended runs and the watchdog are
+connectors for Hermes Agent, Claude Code, Codex and Paperclip, unattended runs and the watchdog are
 implemented and tested. Sessions from other devices and email come next.
 `jezero check-config` tells you which connector types are available in your version.
 
