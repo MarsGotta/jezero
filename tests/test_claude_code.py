@@ -6,9 +6,9 @@ import json
 import os
 from pathlib import Path
 
-from biblioteca.connectors.base import project_from_cwd as _project_from_cwd
-from biblioteca.connectors.claude_code import ClaudeCodeConnector
-from biblioteca.store import ConnectorState
+from jezero.connectors.base import project_from_cwd as _project_from_cwd
+from jezero.connectors.claude_code import ClaudeCodeConnector
+from jezero.store import ConnectorState
 
 NOW = 2_000_000_000.0
 T0 = "2033-05-18T00:00:00Z"  # before NOW

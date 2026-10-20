@@ -11,7 +11,7 @@ released.
 
 ## Scope
 
-Biblioteca stores summaries of personal and work material and serves them to AI agents.
+Jezero stores summaries of personal and work material and serves them to AI agents.
 Issues of particular interest:
 
 - Authentication or per-client source filtering bypasses in the MCP server.

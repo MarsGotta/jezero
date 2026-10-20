@@ -38,7 +38,7 @@ wheels = [
 ]
 
 [[package]]
-name = "biblioteca"
+name = "jezero"
 version = "0.1.0.dev0"
 source = { editable = "." }
 dependencies = [

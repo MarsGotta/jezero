@@ -1,4 +1,4 @@
-"""Command line interface: `biblioteca <command>`."""
+"""Command line interface: `jezero <command>`."""
 
 from __future__ import annotations
 
@@ -150,9 +150,9 @@ def cmd_serve(config: Config, _: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="biblioteca", description=__doc__)
-    parser.add_argument("--version", action="version", version=f"biblioteca {__version__}")
-    parser.add_argument("-c", "--config", help="path to biblioteca.toml")
+    parser = argparse.ArgumentParser(prog="jezero", description=__doc__)
+    parser.add_argument("--version", action="version", version=f"jezero {__version__}")
+    parser.add_argument("-c", "--config", help="path to jezero.toml")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init", help="create or verify the database").set_defaults(fn=cmd_init)

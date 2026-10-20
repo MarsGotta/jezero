@@ -16,8 +16,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-CONFIG_ENV_VAR = "BIBLIOTECA_CONFIG"
-DEFAULT_CONFIG_NAME = "biblioteca.toml"
+CONFIG_ENV_VAR = "JEZERO_CONFIG"
+DEFAULT_CONFIG_NAME = "jezero.toml"
 
 _SECRETISH_KEY = re.compile(
     r"(?i)^(?:.*_)?(?:api_?key|token|secret|password|passwd|credentials?|private_key)$"
@@ -31,7 +31,7 @@ class _Strict(BaseModel):
 
 
 class StorageConfig(_Strict):
-    path: Path = Path("data/biblioteca.db")
+    path: Path = Path("data/jezero.db")
     tokenizer: str = "trigram remove_diacritics 1"
     """FTS5 tokenizer. The default matches plurals as substrings and ignores accents."""
 
@@ -58,7 +58,7 @@ class SummarizerConfig(_Strict):
     base_url: str = "https://api.anthropic.com"
     model: str | None = None
     """Use a cheap, fast model. Required before running any connector."""
-    api_key_env: str = "BIBLIOTECA_SUMMARIZER_API_KEY"
+    api_key_env: str = "JEZERO_SUMMARIZER_API_KEY"
     max_concurrency: int = Field(4, ge=1, le=64)
     timeout_seconds: float = Field(120.0, gt=0)
     max_input_chars: int = Field(60_000, ge=1_000)
@@ -107,7 +107,7 @@ class ClientConfig(_Strict):
     token_env: str | None = None
     """Environment variable holding the client's bearer token."""
     token_sha256: str | None = None
-    """Or: the SHA-256 hex digest of the token (`biblioteca new-token` prints one)."""
+    """Or: the SHA-256 hex digest of the token (`jezero new-token` prints one)."""
     sources: list[str] = Field(default_factory=lambda: ["*"])
     """Source names (glob patterns) this client may read. Default: everything."""
 
@@ -264,7 +264,7 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
     config_path = resolve_config_path(path)
     if not config_path.is_file():
         raise FileNotFoundError(
-            f"config not found at {config_path}. Copy biblioteca.example.toml to "
+            f"config not found at {config_path}. Copy jezero.example.toml to "
             f"{DEFAULT_CONFIG_NAME} or set {CONFIG_ENV_VAR}."
         )
     env_file = config_path.parent / ".env"

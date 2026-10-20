@@ -115,7 +115,7 @@ class Store:
 
     def connect(self, *, readonly: bool = False) -> sqlite3.Connection:
         if readonly and not self.path.exists():
-            raise StoreError(f"database not found at {self.path}; run `biblioteca init` first")
+            raise StoreError(f"database not found at {self.path}; run `jezero init` first")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         con = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         con.row_factory = sqlite3.Row

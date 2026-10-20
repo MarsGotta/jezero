@@ -1,5 +1,5 @@
 [project]
-name = "biblioteca"
+name = "jezero"
 version = "0.1.0.dev0"
 description = "A shared, searchable library of your agents' past work: connectors, summaries with atoms, SQLite FTS5 search, served over MCP."
 readme = "README.md"
@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
-biblioteca = "biblioteca.cli:main"
+jezero = "jezero.cli:main"
 
 [dependency-groups]
 dev = [
@@ -37,7 +37,7 @@ requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/biblioteca"]
+packages = ["src/jezero"]
 
 [tool.ruff]
 line-length = 100

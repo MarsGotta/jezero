@@ -10,12 +10,12 @@ from pathlib import Path
 import httpx
 import pytest
 
-from biblioteca.config import Config, SummarizerConfig
-from biblioteca.connectors.base import segment
-from biblioteca.connectors.hermes import HermesConnector
-from biblioteca.pipeline import run_connector
-from biblioteca.store import ConnectorState, Store
-from biblioteca.summarize import Summarizer
+from jezero.config import Config, SummarizerConfig
+from jezero.connectors.base import segment
+from jezero.connectors.hermes import HermesConnector
+from jezero.pipeline import run_connector
+from jezero.store import ConnectorState, Store
+from jezero.summarize import Summarizer
 
 NOW = 2_000_000_000.0  # fixed "now" for the connector
 HOUR = 3600.0
@@ -148,7 +148,7 @@ def run(config, store, **kw):
 
 def test_pipeline_end_to_end(env, monkeypatch) -> None:
     config, store, _ = env
-    import biblioteca.connectors.hermes as hermes_mod
+    import jezero.connectors.hermes as hermes_mod
 
     monkeypatch.setattr(hermes_mod.time, "time", lambda: NOW)
     calls: list[str] = []
@@ -156,7 +156,7 @@ def test_pipeline_end_to_end(env, monkeypatch) -> None:
         SummarizerConfig(model="fake-haiku", api_key_env="TEST_SUMMARIZER_KEY"),
         transport=fake_anthropic(calls, fail_first=1),
     )
-    monkeypatch.setattr("biblioteca.summarize.asyncio.sleep", _no_sleep)
+    monkeypatch.setattr("jezero.summarize.asyncio.sleep", _no_sleep)
 
     dry = run(config, store, dry_run=True)
     assert (dry.docs, dry.stored, calls) == (1, 0, [])
@@ -182,14 +182,14 @@ async def _no_sleep(_: float) -> None:
 
 def test_summarizer_requires_key(monkeypatch) -> None:
     monkeypatch.delenv("MISSING_KEY", raising=False)
-    from biblioteca.summarize import SummarizerError
+    from jezero.summarize import SummarizerError
 
     with pytest.raises(SummarizerError, match="MISSING_KEY"):
         Summarizer(SummarizerConfig(model="m", api_key_env="MISSING_KEY"))
 
 
 def test_parse_tolerates_malformed_atoms() -> None:
-    from biblioteca.summarize import _parse
+    from jezero.summarize import _parse
 
     out = _parse(
         {

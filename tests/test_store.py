@@ -4,8 +4,8 @@ import sqlite3
 
 import pytest
 
-from biblioteca.models import Atom
-from biblioteca.store import Store, StoreError, build_match_query
+from jezero.models import Atom
+from jezero.store import Store, StoreError, build_match_query
 
 from .conftest import NOW, make_item
 

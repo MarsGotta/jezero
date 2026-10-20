@@ -1,16 +1,16 @@
-# Biblioteca configuration (example).
+# Jezero configuration (example).
 #
-# Copy this file to biblioteca.toml and adapt it. biblioteca.toml is git-ignored on
+# Copy this file to jezero.toml and adapt it. jezero.toml is git-ignored on
 # purpose: it describes YOUR machines and sources.
 #
 # Secrets never go in this file. Wherever a credential is needed, put the NAME of an
 # environment variable in a field ending in _env, and set that variable in the
 # environment of the process (for example through a systemd EnvironmentFile or a .env
-# file that is not committed). `biblioteca check-config` reports which ones are missing.
+# file that is not committed). `jezero check-config` reports which ones are missing.
 
 [storage]
 # Relative paths are resolved against this file's directory.
-path = "data/biblioteca.db"
+path = "data/jezero.db"
 # FTS5 tokenizer. The default matches words as substrings (plurals) and ignores accents.
 # Changing it later requires rebuilding the index.
 tokenizer = "trigram remove_diacritics 1"
@@ -31,7 +31,7 @@ recency_weight = 0.3
 provider = "anthropic"                 # or "openai_compatible"
 base_url = "https://api.anthropic.com" # e.g. a local or self-hosted endpoint
 model = "your-cheap-model-id"
-api_key_env = "BIBLIOTECA_SUMMARIZER_API_KEY"
+api_key_env = "JEZERO_SUMMARIZER_API_KEY"
 max_concurrency = 4
 timeout_seconds = 120
 max_input_chars = 60000
@@ -50,10 +50,10 @@ path = "/mcp"
 require_auth = true
 
 # One entry per agent or person allowed to query. Generate a token with
-# `biblioteca new-token` and store either its digest here or the token in an env var.
+# `jezero new-token` and store either its digest here or the token in an env var.
 [[clients]]
 name = "coding-agent"
-token_env = "BIBLIOTECA_TOKEN_CODING_AGENT"
+token_env = "JEZERO_TOKEN_CODING_AGENT"
 # Glob patterns over connector names. A coding agent does not need your mail.
 sources = ["agent-*"]
 
@@ -63,7 +63,7 @@ token_sha256 = "0000000000000000000000000000000000000000000000000000000000000000
 sources = ["*"]
 
 # Sources. `name` is what clients filter on; `type` picks the implementation.
-# Run `biblioteca check-config` to see which types are implemented in this version.
+# Run `jezero check-config` to see which types are implemented in this version.
 
 [[connectors]]
 name = "agent-hermes"
@@ -105,7 +105,7 @@ name = "agent-devices"
 type = "receiver"
 [connectors.options]
 listen = "127.0.0.1:8766"
-emitter_token_env = "BIBLIOTECA_EMITTER_TOKEN"
+emitter_token_env = "JEZERO_EMITTER_TOKEN"
 
 [[connectors]]
 name = "mail-personal"
@@ -114,7 +114,7 @@ enabled = false
 trust = "external"          # written by third parties: data, never instructions
 interval_minutes = 15
 [connectors.options]
-credentials_file_env = "BIBLIOTECA_GMAIL_CREDENTIALS_FILE"
+credentials_file_env = "JEZERO_GMAIL_CREDENTIALS_FILE"
 skip_categories = ["promotions", "social", "updates", "forums"]
 
 [redaction]
@@ -125,4 +125,4 @@ extra_patterns = []
 [watchdog]
 # Alert when an enabled connector has not succeeded for this long.
 max_silence_hours = 24
-# alert_webhook_env = "BIBLIOTECA_ALERT_WEBHOOK_URL"
+# alert_webhook_env = "JEZERO_ALERT_WEBHOOK_URL"

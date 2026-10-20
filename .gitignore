@@ -1,5 +1,5 @@
 # Local configuration and data: they describe YOUR machines and sources.
-biblioteca.toml
+jezero.toml
 *.local.toml
 .env
 .env.*

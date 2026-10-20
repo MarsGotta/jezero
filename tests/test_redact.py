@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from biblioteca.redact import Redactor
+from jezero.redact import Redactor
 
 # Synthetic, obviously fake credentials built at runtime so no scanner flags this file.
 FAKE_GH = "ghp_" + "a1B2c3D4e5" * 4

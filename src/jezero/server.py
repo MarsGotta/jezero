@@ -32,7 +32,7 @@ from .store import Store
 log = logging.getLogger(__name__)
 
 INSTRUCTIONS = """\
-Biblioteca is a read-only library of past work: agent sessions, email threads and other
+Jezero is a read-only library of past work: agent sessions, email threads and other
 sources, each stored as a summary plus "atoms" (decisions, rationale, fixes, exact errors,
 commands, facts, risks) with the real date it happened.
 
@@ -140,7 +140,7 @@ def build_server(config: Config, store: Store | None = None) -> tuple[MCPServer,
         return Principal(name=token.client_id, sources=None if "*" in allowed else allowed)
 
     mcp = MCPServer(
-        name="biblioteca",
+        name="jezero",
         version=__version__,
         instructions=INSTRUCTIONS,
         token_verifier=verifier,

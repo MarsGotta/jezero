@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest. Biblioteca is early and small on purpose.
+Thanks for your interest. Jezero is early and small on purpose.
 
 1. Open an issue first for anything beyond a small fix, so we can agree on the approach.
 2. Keep changes focused, with tests. Bug fixes come with a regression test.

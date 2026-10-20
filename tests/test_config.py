@@ -5,13 +5,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from biblioteca.config import Config, load_config
+from jezero.config import Config, load_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_example_config_is_valid() -> None:
-    config = load_config(ROOT / "biblioteca.example.toml")
+    config = load_config(ROOT / "jezero.example.toml")
     assert config.server.require_auth
     assert {c.name for c in config.connectors} >= {"agent-hermes", "mail-personal"}
     assert config.db_path.is_absolute()
@@ -62,15 +62,15 @@ def test_tokenizer_is_sanitised() -> None:
 
 
 def test_env_report_never_contains_values(monkeypatch) -> None:
-    monkeypatch.setenv("BIBLIOTECA_TOKEN_CODING_AGENT", "super-secret-value")
-    config = load_config(ROOT / "biblioteca.example.toml")
+    monkeypatch.setenv("JEZERO_TOKEN_CODING_AGENT", "super-secret-value")
+    config = load_config(ROOT / "jezero.example.toml")
     report = config.env_report()
-    assert report["BIBLIOTECA_TOKEN_CODING_AGENT"] is True
+    assert report["JEZERO_TOKEN_CODING_AGENT"] is True
     assert "super-secret-value" not in repr(report)
 
 
 def test_dotenv_next_to_config_is_loaded_without_overriding(tmp_path, monkeypatch) -> None:
-    from biblioteca.config import load_env_file
+    from jezero.config import load_env_file
 
     monkeypatch.delenv("BIB_TEST_A", raising=False)
     monkeypatch.setenv("BIB_TEST_B", "from-environment")

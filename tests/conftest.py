@@ -4,8 +4,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from biblioteca.models import Atom, NewItem
-from biblioteca.store import Store
+from jezero.models import Atom, NewItem
+from jezero.store import Store
 
 NOW = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
 

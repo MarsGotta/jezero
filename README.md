@@ -1,13 +1,17 @@
-# Biblioteca
+# Jezero
 
 **A shared, searchable library of your agents' past work.**
 
 Your agents forget. Their sessions pile up as gigabytes of transcripts on several
-machines, and your email holds decisions nobody wrote down anywhere else. Biblioteca
+machines, and your email holds decisions nobody wrote down anywhere else. Jezero
 collects those sources, turns each session or thread into a short summary plus
 **atoms** (decisions, rationale, fixes, exact errors, commands that worked, facts,
 risks), and serves it all, read-only, to every agent you run over
 [MCP](https://modelcontextprotocol.io).
+
+*The name:* Jezero is the Martian crater that once held a lake. Its layered sediments
+keep the record of what happened there, and the Perseverance rover sets samples aside in
+it so they can be picked up later. That is the whole idea of this project.
 
 ```
  sources          connectors         pipeline                    store            access
@@ -19,7 +23,7 @@ risks), and serves it all, read-only, to every agent you run over
 
 **Status: pre-alpha.** Storage, search, the MCP server, configuration, the summarizer
 and the Hermes Agent connector are implemented and tested. Connectors for Claude Code,
-Codex, other devices and email come next. `biblioteca check-config` tells you which connector types are
+Codex, other devices and email come next. `jezero check-config` tells you which connector types are
 available in your version.
 
 ## Why this design
@@ -45,23 +49,23 @@ Requires Python 3.12+, SQLite 3.45+ (bundled with recent Python builds) and
 
 ```bash
 uv sync
-cp biblioteca.example.toml biblioteca.toml   # then edit it
-uv run biblioteca check-config
-uv run biblioteca init
+cp jezero.example.toml jezero.toml   # then edit it
+uv run jezero check-config
+uv run jezero init
 
 # Try it with the synthetic sample items
-uv run biblioteca import-jsonl examples/items.example.jsonl --source demo
-uv run biblioteca search "migration rollback"
+uv run jezero import-jsonl examples/items.example.jsonl --source demo
+uv run jezero search "migration rollback"
 
 # Serve over MCP (Streamable HTTP)
-uv run biblioteca new-token   # a token for the client, a digest for the config
-uv run biblioteca serve
+uv run jezero new-token   # a token for the client, a digest for the config
+uv run jezero serve
 ```
 
 Connect a client, for example Claude Code:
 
 ```bash
-claude mcp add --transport http biblioteca http://127.0.0.1:8765/mcp \
+claude mcp add --transport http jezero http://127.0.0.1:8765/mcp \
   --header "Authorization: Bearer <token>"
 ```
 
@@ -81,7 +85,7 @@ allows (glob patterns), so a coding agent does not have to see your mail.
 
 Everything lives in one TOML file: storage, search tuning, summarizer endpoint, server
 (host, port, public URL behind a proxy), clients and their allowed sources, connectors,
-redaction and the watchdog. [`biblioteca.example.toml`](biblioteca.example.toml)
+redaction and the watchdog. [`jezero.example.toml`](jezero.example.toml)
 documents every field.
 
 **Secrets never go in the config.** Fields ending in `_env` hold the *name* of an

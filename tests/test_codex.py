@@ -6,8 +6,8 @@ import json
 import os
 from pathlib import Path
 
-from biblioteca.connectors.codex import CodexConnector
-from biblioteca.store import ConnectorState
+from jezero.connectors.codex import CodexConnector
+from jezero.store import ConnectorState
 
 NOW = 2_000_000_000.0
 TS = "2033-05-18T00:00:00Z"

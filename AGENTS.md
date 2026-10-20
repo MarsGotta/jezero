@@ -4,7 +4,7 @@ Instructions for AI agents (and humans) working on this repository.
 
 ## What this is
 
-Biblioteca is an open-source, read-only MCP library of past agent work: connectors ingest
+Jezero is an open-source, read-only MCP library of past agent work: connectors ingest
 sources, a cheap LLM writes summaries plus atoms, SQLite FTS5 indexes them, and an MCP
 server answers agents' queries. Python 3.12+, managed with uv.
 
@@ -13,7 +13,7 @@ server answers agents' queries. Python 3.12+, managed with uv.
 1. **This repository is public. Never commit personal data.** No real session content,
    email, names of people, employers, clients, host names, IP addresses or absolute
    paths from anyone's machine. Fixtures and examples are synthetic. The owner's real
-   configuration lives in `biblioteca.toml`, which is git-ignored. The privacy hook
+   configuration lives in `jezero.toml`, which is git-ignored. The privacy hook
    (`.githooks/pre-commit`) enforces part of this; it is not a substitute for care.
 2. **No secrets anywhere in the tree.** Config references secrets by environment
    variable name (`*_env`). Test credentials are synthetic and built at runtime.
@@ -36,10 +36,10 @@ python3 scripts/privacy_check.py --all
 
 ## Layout
 
-- `src/biblioteca/config.py`: TOML config and validation.
-- `src/biblioteca/store.py`: SQLite schema, upserts, BM25 + recency search.
-- `src/biblioteca/server.py`: MCP server, bearer auth, per-client source filtering.
-- `src/biblioteca/redact.py`: secret redaction.
-- `src/biblioteca/ingest.py`: record to item conversion, JSONL import.
-- `src/biblioteca/connectors/`: connector registry and implementations.
+- `src/jezero/config.py`: TOML config and validation.
+- `src/jezero/store.py`: SQLite schema, upserts, BM25 + recency search.
+- `src/jezero/server.py`: MCP server, bearer auth, per-client source filtering.
+- `src/jezero/redact.py`: secret redaction.
+- `src/jezero/ingest.py`: record to item conversion, JSONL import.
+- `src/jezero/connectors/`: connector registry and implementations.
 - `tests/`: unit tests and an end-to-end MCP test over real HTTP.

@@ -16,9 +16,9 @@ import uvicorn
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
-from biblioteca.config import Config
-from biblioteca.server import build_server
-from biblioteca.store import Store
+from jezero.config import Config
+from jezero.server import build_server
+from jezero.store import Store
 
 from .conftest import make_item
 
