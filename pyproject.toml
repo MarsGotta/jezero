@@ -1,0 +1,55 @@
+[project]
+name = "biblioteca"
+version = "0.1.0.dev0"
+description = "A shared, searchable library of your agents' past work: connectors, summaries with atoms, SQLite FTS5 search, served over MCP."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+authors = [{ name = "Marcela Gotta" }]
+keywords = ["mcp", "agents", "memory", "knowledge-base", "sqlite", "fts5", "bm25"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "mcp>=1.20",
+    "pydantic>=2.7",
+    "httpx>=0.27",
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+biblioteca = "biblioteca.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/biblioteca"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "SIM"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S104", "S105", "S106", "S108", "S603", "S607"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

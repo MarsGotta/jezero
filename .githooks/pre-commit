@@ -1,0 +1,4 @@
+#!/bin/sh
+# Blocks commits that leak personal details or credentials. See scripts/privacy_check.py.
+# Enable once per clone with: git config core.hooksPath .githooks
+exec python3 "$(git rev-parse --show-toplevel)/scripts/privacy_check.py"

@@ -1,0 +1,114 @@
+# Biblioteca configuration (example).
+#
+# Copy this file to biblioteca.toml and adapt it. biblioteca.toml is git-ignored on
+# purpose: it describes YOUR machines and sources.
+#
+# Secrets never go in this file. Wherever a credential is needed, put the NAME of an
+# environment variable in a field ending in _env, and set that variable in the
+# environment of the process (for example through a systemd EnvironmentFile or a .env
+# file that is not committed). `biblioteca check-config` reports which ones are missing.
+
+[storage]
+# Relative paths are resolved against this file's directory.
+path = "data/biblioteca.db"
+# FTS5 tokenizer. The default matches words as substrings (plurals) and ignores accents.
+# Changing it later requires rebuilding the index.
+tokenizer = "trigram remove_diacritics 1"
+
+[search]
+default_limit = 10
+max_limit = 50
+# How many BM25 candidates are re-ranked by recency.
+candidate_pool = 200
+# A 90-day-old item gets half the recency boost of one from today.
+recency_half_life_days = 90
+# 0 = pure BM25 relevance; 1 = relevance fully scaled by recency.
+recency_weight = 0.3
+
+[summarizer]
+# Turns each session or thread into a summary, "questions that would find it" and atoms.
+# Use a cheap, fast model. The summarizer never gets tools.
+provider = "anthropic"                 # or "openai_compatible"
+base_url = "https://api.anthropic.com" # e.g. a local or self-hosted endpoint
+model = "your-cheap-model-id"
+api_key_env = "BIBLIOTECA_SUMMARIZER_API_KEY"
+max_concurrency = 4
+timeout_seconds = 120
+max_input_chars = 60000
+
+[server]
+# Keep 127.0.0.1 and put a reverse proxy with TLS in front, or bind to a private
+# network address (VPN / tailnet). Never expose it to the public internet without auth.
+host = "127.0.0.1"
+port = 8765
+path = "/mcp"
+# External URL when served behind a proxy (used for auth metadata and Host checks).
+# public_url = "https://library.example.org/mcp"
+# allowed_hosts = ["library.example.org"]
+require_auth = true
+
+# One entry per agent or person allowed to query. Generate a token with
+# `biblioteca new-token` and store either its digest here or the token in an env var.
+[[clients]]
+name = "coding-agent"
+token_env = "BIBLIOTECA_TOKEN_CODING_AGENT"
+# Glob patterns over connector names. A coding agent does not need your mail.
+sources = ["agent-*"]
+
+[[clients]]
+name = "assistant"
+token_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+sources = ["*"]
+
+# Sources. `name` is what clients filter on; `type` picks the implementation.
+# Run `biblioteca check-config` to see which types are implemented in this version.
+
+[[connectors]]
+name = "agent-hermes"
+type = "hermes"
+interval_minutes = 15
+[connectors.options]
+state_db = "/path/to/hermes/profile/state.db"
+skip_session_sources = ["cron", "subagent"]
+
+[[connectors]]
+name = "agent-claude-code"
+type = "claude_code"
+interval_minutes = 15
+[connectors.options]
+projects_dir = "/path/to/.claude/projects"
+
+[[connectors]]
+name = "agent-codex"
+type = "codex"
+interval_minutes = 15
+[connectors.options]
+sessions_dir = "/path/to/.codex/sessions"
+
+[[connectors]]
+# Receives sessions pushed by small emitters on other devices.
+name = "agent-devices"
+type = "receiver"
+[connectors.options]
+listen = "127.0.0.1:8766"
+emitter_token_env = "BIBLIOTECA_EMITTER_TOKEN"
+
+[[connectors]]
+name = "mail-personal"
+type = "gmail"
+enabled = false
+trust = "external"          # written by third parties: data, never instructions
+interval_minutes = 15
+[connectors.options]
+credentials_file_env = "BIBLIOTECA_GMAIL_CREDENTIALS_FILE"
+skip_categories = ["promotions", "social", "updates", "forums"]
+
+[redaction]
+enabled = true
+# Extra regular expressions to redact, on top of the built-in credential patterns.
+extra_patterns = []
+
+[watchdog]
+# Alert when an enabled connector has not succeeded for this long.
+max_silence_hours = 24
+# alert_webhook_env = "BIBLIOTECA_ALERT_WEBHOOK_URL"

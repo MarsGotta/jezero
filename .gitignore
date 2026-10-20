@@ -1,0 +1,30 @@
+# Local configuration and data: they describe YOUR machines and sources.
+biblioteca.toml
+*.local.toml
+.env
+.env.*
+!.env.example
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Private denylist used by the pre-commit privacy check.
+.privacy-denylist
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
