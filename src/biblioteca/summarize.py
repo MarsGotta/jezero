@@ -119,7 +119,12 @@ class Summarizer:
         prompt = self._prompt(text, title_hint, context)
         async with self._sem:
             data = await self._call_with_retries(prompt)
-        return _parse(data)
+        try:
+            return _parse(data)
+        except SummarizerError:
+            raise
+        except Exception as exc:  # malformed model output must never abort a whole run
+            raise SummarizerError(f"malformed model output: {exc!r}") from exc
 
     async def _call_with_retries(self, prompt: str, attempts: int = 5) -> dict[str, Any]:
         delay = 2.0
@@ -225,8 +230,17 @@ def _check(resp: httpx.Response) -> dict[str, Any]:
 
 def _parse(data: dict[str, Any]) -> Summary:
     atoms = []
-    for raw in data.get("atoms") or []:
-        kind, text = raw.get("kind"), (raw.get("text") or "").strip()
+    for raw in _as_list(data.get("atoms")):
+        if isinstance(raw, str):
+            # Some answers flatten atoms to "kind: text" strings; recover them.
+            head, sep, rest = raw.partition(":")
+            kind, text = (head.strip().lower(), rest.strip()) if sep else ("fact", raw.strip())
+            if kind not in ATOM_KINDS:
+                kind, text = "fact", raw.strip()
+        elif isinstance(raw, dict):
+            kind, text = raw.get("kind"), str(raw.get("text") or "").strip()
+        else:
+            continue
         if kind in ATOM_KINDS and text:
             atoms.append(Atom(kind=kind, text=text))
     title = (data.get("title") or "").strip()[:200]
@@ -235,5 +249,17 @@ def _parse(data: dict[str, Any]) -> Summary:
         raise SummarizerError("summary or title missing in model output")
     project = data.get("project")
     project = project.strip().lower() if isinstance(project, str) and project.strip() else None
-    questions = [q.strip() for q in data.get("questions") or [] if isinstance(q, str) and q.strip()]
+    questions = [
+        q.strip() for q in _as_list(data.get("questions")) if isinstance(q, str) and q.strip()
+    ]
     return Summary(title, summary, questions[:8], atoms[:16], project)
+
+
+def _as_list(value: Any) -> list[Any]:
+    """Models occasionally return a JSON-encoded string instead of an array."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return [value]
+    return value if isinstance(value, list) else []

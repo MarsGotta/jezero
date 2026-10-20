@@ -186,3 +186,30 @@ def test_summarizer_requires_key(monkeypatch) -> None:
 
     with pytest.raises(SummarizerError, match="MISSING_KEY"):
         Summarizer(SummarizerConfig(model="m", api_key_env="MISSING_KEY"))
+
+
+def test_parse_tolerates_malformed_atoms() -> None:
+    from biblioteca.summarize import _parse
+
+    out = _parse(
+        {
+            "title": "t",
+            "summary": "s",
+            "questions": '["q1", "q2"]',
+            "atoms": [
+                "fix: restart the worker",
+                "plain sentence",
+                {"kind": "error", "text": "E1"},
+                42,
+            ],
+            "project": None,
+        }
+    )
+    assert [(a.kind, a.text) for a in out.atoms] == [
+        ("fix", "restart the worker"),
+        ("fact", "plain sentence"),
+        ("error", "E1"),
+    ]
+    assert out.questions == ["q1", "q2"]
+    flat = _parse({"title": "t", "summary": "s", "atoms": '["fact: a"]', "project": None})
+    assert [(a.kind, a.text) for a in flat.atoms] == [("fact", "a")]
