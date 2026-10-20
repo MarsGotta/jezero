@@ -127,3 +127,61 @@ def test_dialogue_calls_and_reply(tmp_path: Path) -> None:
     assert text.splitlines()[0].startswith("[2033-05-18 01:33]")
     again = conn.collect(ConnectorState(name="agy", cursor=batch.next_cursor), now=NOW)
     assert again.docs == []
+
+
+def test_unreadable_format_is_a_warning_that_holds_the_cursor(tmp_path: Path) -> None:
+    good = [(14, msg((19, msg((2, "Fix the uploader " * 40))))), (15, msg((20, msg((1, "ok")))))]
+    make_store(tmp_path, "good", good, "/w/projects/up")
+    # A new format: same step types, fields moved elsewhere.
+    changed = [(14, msg((44, msg((9, "hello " * 80))))), (15, msg((55, msg((9, "done")))))]
+    make_store(tmp_path, "changed", changed, "/w/projects/up")
+    make_store(tmp_path, "empty", [], "/w/projects/up")
+    conn = AntigravityConnector("agy", {"data_dir": str(tmp_path)}, max_segment_chars=60_000)
+    batch = conn.collect(ConnectorState(name="agy"), now=NOW)
+    assert [d.external_id for d in batch.docs] == ["good#0"]
+    (warning,) = batch.warnings
+    assert "1 conversation(s)" in warning and "changed" in warning
+
+
+def test_pipeline_turns_the_warning_into_a_failing_connector(tmp_path: Path) -> None:
+    import asyncio
+
+    from jezero.config import Config
+    from jezero.pipeline import run_connector
+    from jezero.store import Store
+    from jezero.watchdog import evaluate
+
+    changed = [(14, msg((44, msg((9, "hello " * 80))))), (15, msg((55, msg((9, "done")))))]
+    make_store(tmp_path / "agy", "changed", changed, "/w/projects/up")
+    import time
+
+    past = time.time() - 7200  # run_connector uses the real clock
+    os.utime(tmp_path / "agy" / "conversations" / "changed.db", (past, past))
+    config = Config.model_validate(
+        {
+            "storage": {"path": str(tmp_path / "lib.db")},
+            "summarizer": {"model": "m", "api_key_env": "UNUSED_KEY"},
+            "connectors": [
+                {
+                    "name": "agy",
+                    "type": "antigravity",
+                    "options": {"data_dir": str(tmp_path / "agy")},
+                }
+            ],
+        }
+    )
+    store = Store(config.db_path)
+    store.init()
+
+    class NoCalls:
+        usage = type("U", (), {"input_tokens": 0, "output_tokens": 0})()
+
+        async def summarize(self, *a, **k):  # pragma: no cover - nothing to summarise
+            raise AssertionError("no docs expected")
+
+    report = asyncio.run(run_connector(config, store, config.connectors[0], summarizer=NoCalls()))
+    assert report.warnings and report.stored == 0
+    state = store.get_state("agy")
+    assert state.cursor is None and "format check" in (state.last_error or "")
+    (health,) = evaluate(config, store)
+    assert health.status == "failing"

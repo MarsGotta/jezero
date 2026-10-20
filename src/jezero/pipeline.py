@@ -31,6 +31,7 @@ class RunReport:
     output_tokens: int = 0
     dry_run: bool = False
     errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         data = asdict(self)
@@ -114,6 +115,7 @@ async def run_connector(
     batch = connector.collect(state, limit=limit, sample=sample)
     report.docs = len(batch.docs)
     report.deferred_sessions = batch.deferred
+    report.warnings = list(batch.warnings)
     redactor = Redactor(config.redaction.extra_patterns, enabled=config.redaction.enabled)
 
     pending: list[tuple[RawDoc, str, str]] = []
@@ -179,14 +181,16 @@ async def run_connector(
     report.output_tokens = summarizer.usage.output_tokens
     now = datetime.now(UTC).isoformat()
     ok = report.failed == 0
+    advance = ok and not report.warnings and batch.next_cursor
+    problems = report.errors[:3] + report.warnings[:2]
     store.set_state(
         ConnectorState(
             name=conn.name,
-            cursor=batch.next_cursor if ok and batch.next_cursor else state.cursor,
+            cursor=batch.next_cursor if advance else state.cursor,
             last_run_at=now,
             last_success_at=now if ok else state.last_success_at,
             last_item_at=now if report.stored else state.last_item_at,
-            last_error=None if ok else "; ".join(report.errors[:3])[:1000],
+            last_error="; ".join(problems)[:1000] if problems else None,
         )
     )
     return report

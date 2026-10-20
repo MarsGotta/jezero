@@ -11,7 +11,11 @@ fields observed to be stable:
 - step metadata field 1: creation time (seconds, nanos).
 
 Tool results (type 132), thinking notes, task notifications and context checkpoints are
-dropped. Anything that does not parse is skipped, never guessed. Titles and workspaces come
+dropped. Anything that does not parse is skipped, never guessed.
+
+Because the format is internal, a conversation with steps from which nothing at all can be
+read is reported as a warning instead of being skipped as "too short": the watchdog then
+marks the connector as failing until the reader is updated. Titles and workspaces come
 from `conversation_summaries.db` when it is there.
 """
 
@@ -123,6 +127,7 @@ class AntigravityConnector:
         self.max_tool_args = int(options.get("max_tool_args_chars", 200))
         self.skip_dir_globs = list(options.get("skip_dir_globs", []))
         self.min_chars = int(options.get("min_chars", 400))
+        self.unreadable_min_steps = int(options.get("unreadable_min_steps", 2))
         self.project_aliases = dict(options.get("project_aliases", {}))
         self.prompt_cleaner = PromptCleaner(options)
         self.max_segment_chars = max_segment_chars
@@ -159,16 +164,27 @@ class AntigravityConnector:
         info = self._summaries()
         docs: list[RawDoc] = []
         processed: list[float] = []
+        unreadable: list[str] = []
         taken = 0
         for mtime, path in ready:
             if (sample is not None and taken >= sample) or (limit is not None and taken >= limit):
                 break
-            conversation_docs = self._conversation_docs(path, info.get(path.stem, {}), mtime)
+            conversation_docs, readable = self._conversation_docs(
+                path, info.get(path.stem, {}), mtime
+            )
+            if not readable:
+                unreadable.append(path.stem)
             processed.append(mtime)
             docs.extend(conversation_docs)
             taken += 1 if (conversation_docs or sample is None) else 0
         next_cursor = repr(max(processed)) if sample is None and processed else None
-        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
+        warnings = []
+        if unreadable:
+            warnings.append(
+                f"format check: nothing readable in {len(unreadable)} conversation(s) with"
+                f" steps ({', '.join(unreadable[:3])}); the Antigravity format may have changed"
+            )
+        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred, warnings=warnings)
 
     def _summaries(self) -> dict[str, dict[str, Any]]:
         path = self.data_dir / "conversation_summaries.db"
@@ -196,10 +212,14 @@ class AntigravityConnector:
             out[str(conversation_id)] = {"title": title or None, "workspace": workspace}
         return out
 
-    def _conversation_docs(self, path: Path, info: dict[str, Any], mtime: float) -> list[RawDoc]:
+    def _conversation_docs(
+        self, path: Path, info: dict[str, Any], mtime: float
+    ) -> tuple[list[RawDoc], bool]:
+        """Return (docs, readable). `readable` is False when the conversation has steps
+        but the reader recognised none of them."""
         workspace = info.get("workspace")
         if workspace and any(fnmatch.fnmatch(workspace, g) for g in self.skip_dir_globs):
-            return []
+            return [], True
         try:
             con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
             try:
@@ -209,7 +229,7 @@ class AntigravityConnector:
             finally:
                 con.close()
         except sqlite3.Error:
-            return []
+            return [], False
         blocks: list[tuple[int, float, str]] = []
         stamp = mtime
         for _idx, step_type, metadata, payload in rows:
@@ -218,8 +238,9 @@ class AntigravityConnector:
                 continue
             for text in self._render(step_type, payload, stamp):
                 blocks.append((len(blocks), stamp, text))
+        readable = bool(blocks) or len(rows) < self.unreadable_min_steps
         if sum(len(b[2]) for b in blocks) < self.min_chars:
-            return []
+            return [], readable
         project = project_from_cwd(workspace, self.project_aliases) or self.default_project
         title = info.get("title")
         parts = segment(blocks, self.max_segment_chars)
@@ -239,7 +260,7 @@ class AntigravityConnector:
                     meta={"part": number, "parts": len(parts)},
                 )
             )
-        return docs
+        return docs, True
 
     @staticmethod
     def _stamp(metadata: Any) -> float | None:

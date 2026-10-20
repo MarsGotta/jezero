@@ -33,6 +33,10 @@ class Batch:
     """Cursor to persist once every doc in the batch has been stored."""
     deferred: int = 0
     """Units seen but postponed (for example sessions still active)."""
+    warnings: list[str] = field(default_factory=list)
+    """Problems that must reach the watchdog, such as a source format the connector no
+    longer understands. The pipeline records them as the connector's error and keeps the
+    cursor where it was, so the alert stays until the cause is fixed."""
 
 
 class Connector(Protocol):

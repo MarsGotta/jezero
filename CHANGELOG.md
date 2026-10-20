@@ -41,3 +41,7 @@
 - Antigravity CLI connector: reads the per-conversation SQLite store through a minimal
   protobuf wire reader (user text, agent replies, one line per tool call with its summary);
   unknown or malformed steps are skipped.
+- Connectors can report warnings. The pipeline stores them as the connector's error and
+  holds the cursor, so `jezero health` (and the heartbeat) shows the connector as failing
+  until the cause is fixed. The Antigravity connector warns when a conversation has steps
+  but nothing in it can be read, which is how a format change shows up.
