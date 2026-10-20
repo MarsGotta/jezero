@@ -11,6 +11,7 @@ whole transcripts) are skipped unless `include_subagents` is set.
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 import re
@@ -55,9 +56,13 @@ class CodexConnector:
         default_project: str | None = None,
     ) -> None:
         self.name = name
-        self.root = Path(os.path.expanduser(str(options["sessions_dir"])))
-        index = options.get("session_index", str(self.root.parent / "session_index.jsonl"))
-        self.session_index = Path(os.path.expanduser(str(index)))
+        # `sessions_dir` may be a glob: orchestrators give each agent its own CODEX_HOME,
+        # so one connector can follow every `<home>/sessions` and pick up new agents.
+        self.root_pattern = os.path.expanduser(str(options["sessions_dir"]))
+        self.is_glob = glob.has_magic(self.root_pattern)
+        self.root = Path(self.root_pattern)
+        index = options.get("session_index")
+        self.session_index = Path(os.path.expanduser(str(index))) if index else None
         self.settle_seconds = float(options.get("settle_minutes", 30)) * 60
         self.include_subagents = bool(options.get("include_subagents", False))
         self.include_tool_calls = bool(options.get("include_tool_calls", True))
@@ -67,6 +72,14 @@ class CodexConnector:
         self.skip_cwd_globs = list(options.get("skip_cwd_globs", []))
         self.min_chars = int(options.get("min_chars", 400))
         self.project_aliases = dict(options.get("project_aliases", {}))
+        # Orchestrators prepend the same long agent instructions to every prompt. A user
+        # message containing one of these markers keeps only the text from the marker on.
+        self.user_prompt_markers = [
+            re.compile(m, re.MULTILINE) for m in options.get("user_prompt_markers", [])
+        ]
+        # Boilerplate lines that survive the cut (fixed procedure text), dropped line by line.
+        drop = options.get("user_prompt_drop_lines", [])
+        self.user_prompt_drop = re.compile("|".join(f"(?:{d})" for d in drop)) if drop else None
         self.max_segment_chars = max_segment_chars
         self.default_project = default_project
 
@@ -78,24 +91,26 @@ class CodexConnector:
         sample: int | None = None,
         now: float | None = None,
     ) -> Batch:
-        if not self.root.is_dir():
+        roots = self._roots()
+        if not roots and not self.is_glob:
             raise FileNotFoundError(f"Codex sessions directory not found: {self.root}")
         now = time.time() if now is None else now
         settled_before = now - self.settle_seconds
         cursor = float(state.cursor) if state.cursor and sample is None else 0.0
         candidates = []
-        for path in self.root.rglob("*.jsonl"):
-            try:
-                mtime = path.stat().st_mtime
-            except FileNotFoundError:
-                continue
-            if mtime > cursor:
-                candidates.append((mtime, path))
+        for root in roots:
+            for path in root.rglob("*.jsonl"):
+                try:
+                    mtime = path.stat().st_mtime
+                except FileNotFoundError:
+                    continue
+                if mtime > cursor:
+                    candidates.append((mtime, path))
         deferred = sum(1 for m, _ in candidates if m > settled_before)
         ready = sorted(
             (c for c in candidates if c[0] <= settled_before), reverse=sample is not None
         )
-        titles = self._titles()
+        titles = self._titles(roots)
         docs: list[RawDoc] = []
         taken = 0
         processed: list[float] = []
@@ -109,17 +124,28 @@ class CodexConnector:
         next_cursor = repr(max(processed)) if sample is None and processed else None
         return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
 
-    def _titles(self) -> dict[str, str]:
+    def _roots(self) -> list[Path]:
+        if self.is_glob:
+            return sorted(Path(p) for p in glob.glob(self.root_pattern) if Path(p).is_dir())
+        return [self.root] if self.root.is_dir() else []
+
+    def _titles(self, roots: list[Path]) -> dict[str, str]:
         titles: dict[str, str] = {}
-        if not self.session_index.is_file():
-            return titles
-        for line in self.session_index.read_text(encoding="utf-8", errors="replace").splitlines():
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
+        indexes = (
+            [self.session_index]
+            if self.session_index
+            else [r.parent / "session_index.jsonl" for r in roots]
+        )
+        for index in indexes:
+            if not index.is_file():
                 continue
-            if isinstance(row, dict) and row.get("id") and row.get("thread_name"):
-                titles[str(row["id"])] = str(row["thread_name"])
+            for line in index.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(row, dict) and row.get("id") and row.get("thread_name"):
+                    titles[str(row["id"])] = str(row["thread_name"])
         return titles
 
     def _session_docs(self, path: Path, titles: dict[str, str]) -> tuple[list[RawDoc], bool]:
@@ -198,6 +224,8 @@ class CodexConnector:
             if role not in ("user", "assistant"):
                 return ""  # developer/system instructions
             texts = _message_texts(payload)
+            if role == "user" and (self.user_prompt_markers or self.user_prompt_drop):
+                texts = [self._cut_prompt(t) for t in texts]
             return "\n".join(f"[{when}] {role}: {t}" for t in texts)
         if kind in ("function_call", "custom_tool_call") and self.include_tool_calls:
             name = str(payload.get("name") or "?")
@@ -209,6 +237,17 @@ class CodexConnector:
             line = self._describe_call(name, args)
             return f"[{when}] {line}" if line else ""
         return ""
+
+    def _cut_prompt(self, text: str) -> str:
+        for marker in self.user_prompt_markers:
+            found = marker.search(text)
+            if found:
+                text = text[found.start() :]
+                break
+        if self.user_prompt_drop:
+            drop = self.user_prompt_drop
+            text = "\n".join(line for line in text.splitlines() if not drop.match(line))
+        return text
 
     def _describe_call(self, name: str, args: str) -> str | None:
         """One short line per call; polling and read-only inspection are dropped."""

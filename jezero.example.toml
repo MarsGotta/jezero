@@ -100,6 +100,20 @@ min_chars = 400
 # project_aliases = { "my-app-wt" = "my-app" }   # map folder names to project slugs
 
 [[connectors]]
+# Codex agents run by an orchestrator, each with its own CODEX_HOME. `sessions_dir` accepts
+# a glob, so agents added later are picked up without touching the config.
+name = "agent-codex-orchestrated"
+type = "codex"
+enabled = false
+interval_minutes = 15
+[connectors.options]
+sessions_dir = "~/orchestrator/agents/*/codex-home/sessions"
+# The orchestrator prepends the same long agent instructions to every prompt. Keep each
+# user message only from this marker on, and drop fixed procedure lines that remain.
+user_prompt_markers = ['^## Wake Payload']
+user_prompt_drop_lines = ['^Execution contract:']
+
+[[connectors]]
 # Receives sessions pushed by small emitters on other devices.
 name = "agent-devices"
 type = "receiver"

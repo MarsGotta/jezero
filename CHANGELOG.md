@@ -21,3 +21,6 @@
   no longer stops the others) and `jezero health` (stale/failing connectors, optional
   webhook alert with de-duplication). systemd user units in `deploy/`.
 - Renamed from "biblioteca" to Jezero.
+- Codex connector: `sessions_dir` accepts a glob (one connector for every agent home an
+  orchestrator creates) and `user_prompt_markers` / `user_prompt_drop_lines` strip the
+  agent instructions an orchestrator repeats in every prompt.

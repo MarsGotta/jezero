@@ -155,3 +155,42 @@ def test_sample_counts_only_real_sessions(tmp_path: Path) -> None:
     batch = conn.collect(ConnectorState("c"), sample=1, now=NOW)
     assert len({d.original_ref for d in batch.docs}) == 1
     assert batch.next_cursor is None
+
+
+def test_sessions_dir_glob_follows_every_agent_home(tmp_path: Path) -> None:
+    for agent, text in (("alpha", "first"), ("beta", "second")):
+        rollout(
+            tmp_path / "homes" / agent / "sessions" / "2033" / f"rollout-{agent}.jsonl",
+            {"id": f"sess-{agent}", "cwd": "/w/projects/app", "source": "exec"},
+            [msg("user", f"{text} task " + "x" * 400), msg("assistant", "done " + "y" * 200)],
+        )
+        (tmp_path / "homes" / agent / "session_index.jsonl").write_text(
+            json.dumps({"id": f"sess-{agent}", "thread_name": f"{text} title"}) + "\n"
+        )
+    pattern = str(tmp_path / "homes" / "*" / "sessions")
+    conn = CodexConnector("c", {"sessions_dir": pattern}, max_segment_chars=60_000)
+    batch = conn.collect(ConnectorState(name="c"), now=NOW)
+    assert sorted(d.title_hint for d in batch.docs) == ["first title", "second title"]
+    empty = CodexConnector(
+        "c", {"sessions_dir": str(tmp_path / "none" / "*" / "sessions")}, max_segment_chars=60_000
+    )
+    assert empty.collect(ConnectorState(name="c"), now=NOW).docs == []
+
+
+def test_user_prompt_markers_drop_repeated_agent_instructions(tmp_path: Path) -> None:
+    prompt = "# Agent role\n" + "long instructions " * 50 + "\n## Wake Payload\nFix the login bug"
+    rollout(
+        tmp_path / "sessions" / "2033" / "rollout-w.jsonl",
+        {"id": "sess-w", "cwd": "/w/projects/app", "source": "exec"},
+        [msg("user", prompt), msg("assistant", "Fixed it " + "z" * 400)],
+    )
+    opts = {
+        "sessions_dir": str(tmp_path / "sessions"),
+        "user_prompt_markers": ["^## Wake Payload"],
+        "user_prompt_drop_lines": ["Fix the"],
+    }
+    conn = CodexConnector("c", opts, max_segment_chars=60_000)
+    (doc,) = conn.collect(ConnectorState(name="c"), now=NOW).docs
+    assert "long instructions" not in doc.text
+    assert "## Wake Payload" in doc.text
+    assert "Fix the login bug" not in doc.text
