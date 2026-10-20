@@ -17,9 +17,9 @@ risks), and serves it all, read-only, to every agent you run over
                      hashed          content            atoms       one file only
 ```
 
-**Status: pre-alpha.** Storage, search, the MCP server, configuration and JSONL import
-are implemented and tested. Connectors for agent sessions and email, and the
-summarizer, come next. `biblioteca check-config` tells you which connector types are
+**Status: pre-alpha.** Storage, search, the MCP server, configuration, the summarizer
+and the Hermes Agent connector are implemented and tested. Connectors for Claude Code,
+Codex, other devices and email come next. `biblioteca check-config` tells you which connector types are
 available in your version.
 
 ## Why this design
@@ -119,8 +119,8 @@ addresses, credential shapes, or any term listed in your private, git-ignored
 
 ## Roadmap
 
-1. Summarizer (Anthropic and OpenAI-compatible endpoints) with the atoms schema.
-2. Connectors for agent sessions: Hermes Agent, Claude Code, Codex.
+1. Connectors for Claude Code and Codex sessions.
+2. A scheduler (systemd timer or built-in loop) for unattended runs.
 3. A receiver plus small emitters for sessions on other devices.
 4. Gmail connector (read-only scope, per thread, newsletters skipped).
 5. Watchdog alerts when a connector goes quiet.

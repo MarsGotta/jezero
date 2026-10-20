@@ -62,7 +62,9 @@ class SummarizerConfig(_Strict):
     max_concurrency: int = Field(4, ge=1, le=64)
     timeout_seconds: float = Field(120.0, gt=0)
     max_input_chars: int = Field(60_000, ge=1_000)
-    """Longer inputs are summarised in parts and then merged."""
+    """Longer inputs are split into parts, each summarised on its own."""
+    known_projects: list[str] = Field(default_factory=list)
+    """Project slugs the summarizer should prefer when tagging items."""
 
 
 class ServerConfig(_Strict):

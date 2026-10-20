@@ -107,6 +107,36 @@ def cmd_new_token(_: Config | None, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run(config: Config, args: argparse.Namespace) -> int:
+    import asyncio
+
+    from .pipeline import run_connector
+
+    store = _store(config)
+    store.init()
+    selected = [
+        c
+        for c in config.connectors
+        if (args.connector is None and c.enabled) or c.name == args.connector
+    ]
+    if args.connector and not selected:
+        print(f"error: no connector named {args.connector!r}", file=sys.stderr)
+        return 2
+    status = 0
+    for conn in selected:
+        if CONNECTOR_TYPES[conn.type].status != "available":
+            print(json.dumps({"connector": conn.name, "skipped": "not implemented yet"}))
+            continue
+        report = asyncio.run(
+            run_connector(
+                config, store, conn, limit=args.limit, sample=args.sample, dry_run=args.dry_run
+            )
+        )
+        print(json.dumps(report.to_dict(), ensure_ascii=False))
+        status = status or (1 if report.failed else 0)
+    return status
+
+
 def cmd_serve(config: Config, _: argparse.Namespace) -> int:
     import uvicorn
 
@@ -148,6 +178,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("new-token", help="generate a client token and its SHA-256 digest")
     p.set_defaults(fn=cmd_new_token, needs_config=False)
 
+    p = sub.add_parser("run", help="run connectors once: collect, summarise, store")
+    p.add_argument("--connector", help="only this connector (default: every enabled one)")
+    p.add_argument("--limit", type=int, help="process at most N units, oldest first")
+    p.add_argument("--sample", type=int, help="process the newest N units, cursor untouched")
+    p.add_argument("--dry-run", action="store_true", help="count work without calling the LLM")
+    p.set_defaults(fn=cmd_run)
+
     sub.add_parser("serve", help="run the MCP server").set_defaults(fn=cmd_serve)
     return parser
 
@@ -157,7 +194,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = load_config(args.config) if getattr(args, "needs_config", True) else None
         return args.fn(config, args)
-    except (FileNotFoundError, StoreError, IngestError) as exc:
+    except (FileNotFoundError, StoreError, IngestError, NotImplementedError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except RuntimeError as exc:  # SummarizerError and friends
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except ValidationError as exc:

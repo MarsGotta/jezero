@@ -35,6 +35,8 @@ api_key_env = "BIBLIOTECA_SUMMARIZER_API_KEY"
 max_concurrency = 4
 timeout_seconds = 120
 max_input_chars = 60000
+# Project slugs the summarizer should prefer when tagging items.
+known_projects = ["billing-api", "docs-site"]
 
 [server]
 # Keep 127.0.0.1 and put a reverse proxy with TLS in front, or bind to a private
@@ -70,6 +72,8 @@ interval_minutes = 15
 [connectors.options]
 state_db = "/path/to/hermes/profile/state.db"
 skip_session_sources = ["cron", "subagent"]
+settle_minutes = 30          # wait until a session has been quiet this long
+include_tool_calls = true    # one short line per tool call; tool results are skipped
 
 [[connectors]]
 name = "agent-claude-code"

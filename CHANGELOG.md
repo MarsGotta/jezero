@@ -10,3 +10,9 @@
 - Secret redaction before storage.
 - JSONL import of pre-summarised items.
 - Privacy pre-commit check.
+- Summarizer for Anthropic and OpenAI-compatible endpoints: title, summary, questions,
+  atoms and project through a fixed JSON schema, with retries.
+- Hermes Agent connector: read-only, dialogue only (tool results skipped), injected
+  memory blocks stripped, stable segments for long sessions, active sessions deferred.
+- `biblioteca run` with `--dry-run`, `--limit` and `--sample`; per-connector cursor.
+- A `.env` file next to the config is loaded automatically.

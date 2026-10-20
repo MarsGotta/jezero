@@ -26,7 +26,7 @@ CONNECTOR_TYPES: dict[str, ConnectorType] = {
     for t in (
         ConnectorType(
             "hermes",
-            "planned",
+            "available",
             "Hermes Agent sessions from its state.db (read-only).",
         ),
         ConnectorType(
