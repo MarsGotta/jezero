@@ -4,7 +4,7 @@ Thanks for your interest. Biblioteca is early and small on purpose.
 
 1. Open an issue first for anything beyond a small fix, so we can agree on the approach.
 2. Keep changes focused, with tests. Bug fixes come with a regression test.
-3. Run the checks before opening a pull request:
+3. Run the checks listed in [AGENTS.md](AGENTS.md) before opening a pull request:
    `uv run pytest`, `uv run ruff check src tests`, `uv run ruff format --check src tests`
    and `python3 scripts/privacy_check.py --all`.
 4. Enable the privacy hook once per clone: `git config core.hooksPath .githooks`.
