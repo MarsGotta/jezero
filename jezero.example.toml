@@ -125,4 +125,5 @@ extra_patterns = []
 [watchdog]
 # Alert when an enabled connector has not succeeded for this long.
 max_silence_hours = 24
-# alert_webhook_env = "JEZERO_ALERT_WEBHOOK_URL"
+# alert_webhook_env = "JEZERO_ALERT_WEBHOOK_URL"   # receives {"text": ..., "connector": ...}
+realert_hours = 12                                 # repeat an alert at most this often

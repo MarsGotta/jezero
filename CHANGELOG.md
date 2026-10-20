@@ -16,3 +16,8 @@
   memory blocks stripped, stable segments for long sessions, active sessions deferred.
 - `jezero run` with `--dry-run`, `--limit` and `--sample`; per-connector cursor.
 - A `.env` file next to the config is loaded automatically.
+- Claude Code and Codex connectors.
+- `jezero run --due` (per-connector intervals, one run at a time, a failing connector
+  no longer stops the others) and `jezero health` (stale/failing connectors, optional
+  webhook alert with de-duplication). systemd user units in `deploy/`.
+- Renamed from "biblioteca" to Jezero.

@@ -21,10 +21,10 @@ it so they can be picked up later. That is the whole idea of this project.
                      hashed          content            atoms       one file only
 ```
 
-**Status: pre-alpha.** Storage, search, the MCP server, configuration, the summarizer
-and the Hermes Agent connector are implemented and tested. Connectors for Claude Code,
-Codex, other devices and email come next. `jezero check-config` tells you which connector types are
-available in your version.
+**Status: pre-alpha.** Storage, search, the MCP server, configuration, the summarizer,
+connectors for Hermes Agent, Claude Code and Codex, unattended runs and the watchdog are
+implemented and tested. Sessions from other devices and email come next.
+`jezero check-config` tells you which connector types are available in your version.
 
 ## Why this design
 
@@ -121,14 +121,18 @@ The pre-commit hook blocks commits that contain absolute home paths, private net
 addresses, credential shapes, or any term listed in your private, git-ignored
 `.privacy-denylist`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Running it unattended
+
+`jezero run --due` runs the connectors whose interval has elapsed, `jezero health` flags
+connectors that went quiet. Ready-made systemd user units and a cron line are in
+[`deploy/`](deploy/README.md).
+
 ## Roadmap
 
-1. Connectors for Claude Code and Codex sessions.
-2. A scheduler (systemd timer or built-in loop) for unattended runs.
-3. A receiver plus small emitters for sessions on other devices.
-4. Gmail connector (read-only scope, per thread, newsletters skipped).
-5. Watchdog alerts when a connector goes quiet.
-6. Optional vector search with sqlite-vec.
+1. A receiver plus small emitters for sessions on other devices.
+2. Gmail connector (read-only scope, per thread, newsletters skipped).
+3. A retrieval benchmark command (questions with expected hits, top-k accuracy).
+4. Optional vector search with sqlite-vec.
 
 ## License
 

@@ -312,6 +312,20 @@ class Store:
             rows = con.execute("SELECT * FROM connector_state ORDER BY name").fetchall()
         return [ConnectorState(**dict(r)) for r in rows]
 
+    # -- small key/value metadata -----------------------------------------------------
+
+    def get_meta(self, key: str) -> str | None:
+        with self._read() as con:
+            row = con.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value: str | None) -> None:
+        with self._write() as con:
+            if value is None:
+                con.execute("DELETE FROM meta WHERE key = ?", (key,))
+            else:
+                con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
+
     # -- reads ---------------------------------------------------------------------
 
     def sources(self) -> list[str]:

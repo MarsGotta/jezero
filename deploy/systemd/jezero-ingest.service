@@ -1,0 +1,17 @@
+# Jezero ingestion: runs the connectors that are due, then the watchdog.
+# Install as a user unit (see deploy/README.md). Adjust the paths if the checkout lives
+# somewhere else; the config is read from jezero.toml in that directory.
+[Unit]
+Description=Jezero: ingest new agent sessions
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/jezero
+# "-": a failing connector must not skip the health check that reports it.
+ExecStart=-%h/jezero/.venv/bin/jezero run --due
+ExecStart=%h/jezero/.venv/bin/jezero health
+Nice=10
+IOSchedulingClass=idle
+# A first backfill can take a while; later runs take seconds.
+TimeoutStartSec=3h

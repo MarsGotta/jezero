@@ -1,0 +1,11 @@
+[Unit]
+Description=Jezero: check every 5 minutes for connectors that are due
+
+[Timer]
+OnBootSec=5min
+OnCalendar=*:0/5
+RandomizedDelaySec=30
+# If a run is still going, systemd does not start another one.
+
+[Install]
+WantedBy=timers.target

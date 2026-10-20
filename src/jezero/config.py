@@ -181,6 +181,8 @@ class WatchdogConfig(_Strict):
     """Alert when an enabled connector has not succeeded for this long."""
     alert_webhook_env: str | None = None
     """Env var holding a webhook URL that receives a JSON alert."""
+    realert_hours: float = Field(12.0, gt=0)
+    """Repeat an alert for the same connector at most this often."""
 
 
 class Config(_Strict):

@@ -7,12 +7,14 @@ import hashlib
 import json
 import secrets
 import sys
+from dataclasses import asdict, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from pydantic import ValidationError
 
 from . import __version__
-from .config import Config, load_config
+from .config import Config, ConnectorConfig, load_config
 from .connectors import CONNECTOR_TYPES
 from .ingest import IngestError, import_jsonl
 from .redact import Redactor
@@ -107,10 +109,15 @@ def cmd_new_token(_: Config | None, args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_run(config: Config, args: argparse.Namespace) -> int:
-    import asyncio
+def _is_due(store: Store, conn: ConnectorConfig, now: datetime) -> bool:
+    last = store.get_state(conn.name).last_run_at
+    if not last:
+        return True
+    return now - datetime.fromisoformat(last) >= timedelta(minutes=conn.interval_minutes)
 
-    from .pipeline import run_connector
+
+def cmd_run(config: Config, args: argparse.Namespace) -> int:
+    import fcntl
 
     store = _store(config)
     store.init()
@@ -122,19 +129,64 @@ def cmd_run(config: Config, args: argparse.Namespace) -> int:
     if args.connector and not selected:
         print(f"error: no connector named {args.connector!r}", file=sys.stderr)
         return 2
+    # One run at a time: a timer firing during a long manual backfill just skips.
+    with config.db_path.with_suffix(".run.lock").open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(json.dumps({"skipped": "another run is in progress"}))
+            return 0
+        return _run_selected(config, store, selected, args)
+
+
+def _run_selected(
+    config: Config, store: Store, selected: list[ConnectorConfig], args: argparse.Namespace
+) -> int:
+    import asyncio
+
+    from .pipeline import run_connector
+
+    now = datetime.now(UTC)
     status = 0
     for conn in selected:
         if CONNECTOR_TYPES[conn.type].status != "available":
             print(json.dumps({"connector": conn.name, "skipped": "not implemented yet"}))
             continue
-        report = asyncio.run(
-            run_connector(
-                config, store, conn, limit=args.limit, sample=args.sample, dry_run=args.dry_run
+        if args.due and not _is_due(store, conn, now):
+            continue
+        try:
+            report = asyncio.run(
+                run_connector(
+                    config, store, conn, limit=args.limit, sample=args.sample, dry_run=args.dry_run
+                )
             )
-        )
+        except Exception as exc:  # one broken source must not stop the others
+            state = replace(
+                store.get_state(conn.name),
+                last_run_at=datetime.now(UTC).isoformat(),
+                last_error=f"{type(exc).__name__}: {exc}"[:1000],
+            )
+            store.set_state(state)
+            print(json.dumps({"connector": conn.name, "error": state.last_error}))
+            status = 1
+            continue
         print(json.dumps(report.to_dict(), ensure_ascii=False))
         status = status or (1 if report.failed else 0)
     return status
+
+
+def cmd_health(config: Config, _: argparse.Namespace) -> int:
+    from .watchdog import alert, evaluate
+
+    store = _store(config)
+    store.init()
+    report = evaluate(config, store)
+    for entry in report:
+        print(json.dumps({**asdict(entry)}, ensure_ascii=False))
+    sent = alert(config, store, report)
+    if sent:
+        print(json.dumps({"alerted": sent}))
+    return 0 if all(e.healthy for e in report) else 1
 
 
 def cmd_serve(config: Config, _: argparse.Namespace) -> int:
@@ -183,7 +235,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, help="process at most N units, oldest first")
     p.add_argument("--sample", type=int, help="process the newest N units, cursor untouched")
     p.add_argument("--dry-run", action="store_true", help="count work without calling the LLM")
+    p.add_argument(
+        "--due", action="store_true", help="only connectors whose interval_minutes has elapsed"
+    )
     p.set_defaults(fn=cmd_run)
+
+    sub.add_parser(
+        "health", help="report stale or failing connectors (exit 1 if any); alert if set"
+    ).set_defaults(fn=cmd_health)
 
     sub.add_parser("serve", help="run the MCP server").set_defaults(fn=cmd_serve)
     return parser
