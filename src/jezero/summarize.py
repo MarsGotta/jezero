@@ -105,6 +105,12 @@ class Summarizer:
 
     def _prompt(self, text: str, title_hint: str | None, context: str | None) -> str:
         head = []
+        if self.config.output_language:
+            head.append(
+                f"Write title, summary, questions and atoms in {self.config.output_language},"
+                " whatever the document's language. Keep commands, errors, code and names"
+                " verbatim."
+            )
         if self.known_projects:
             head.append("Known projects (prefer these slugs): " + ", ".join(self.known_projects))
         if title_hint:

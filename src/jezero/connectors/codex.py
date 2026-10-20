@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from ..store import ConnectorState
-from .base import Batch, RawDoc, project_from_cwd, segment
+from .base import READ_ONLY_COMMAND, Batch, PromptCleaner, RawDoc, project_from_cwd, segment
 
 # Text blocks that Codex injects into "user" messages.
 _INJECTED_PREFIXES = (
@@ -40,10 +40,7 @@ _USER_KIND = "user.text"
 # tools.write_stdin(...) to poll a running command, tools.apply_patch("*** Begin Patch...").
 _CMD = re.compile(r'"?cmd"?\s*:\s*"((?:[^"\\]|\\.)*)"')
 _PATCH_FILE = re.compile(r"\*\*\* (Add|Update|Delete) File: ([^\n\\\"]+)")
-_READ_ONLY = re.compile(
-    r"^\s*(sed -n|rg|grep|cat|head|tail|ls|nl|wc|find|pwd|tree|stat|file|which|"
-    r"git (status|diff|log|show|branch|rev-parse|ls-files))\b"
-)
+_READ_ONLY = READ_ONLY_COMMAND
 
 
 class CodexConnector:
@@ -72,14 +69,7 @@ class CodexConnector:
         self.skip_cwd_globs = list(options.get("skip_cwd_globs", []))
         self.min_chars = int(options.get("min_chars", 400))
         self.project_aliases = dict(options.get("project_aliases", {}))
-        # Orchestrators prepend the same long agent instructions to every prompt. A user
-        # message containing one of these markers keeps only the text from the marker on.
-        self.user_prompt_markers = [
-            re.compile(m, re.MULTILINE) for m in options.get("user_prompt_markers", [])
-        ]
-        # Boilerplate lines that survive the cut (fixed procedure text), dropped line by line.
-        drop = options.get("user_prompt_drop_lines", [])
-        self.user_prompt_drop = re.compile("|".join(f"(?:{d})" for d in drop)) if drop else None
+        self.prompt_cleaner = PromptCleaner(options)
         self.max_segment_chars = max_segment_chars
         self.default_project = default_project
 
@@ -224,8 +214,8 @@ class CodexConnector:
             if role not in ("user", "assistant"):
                 return ""  # developer/system instructions
             texts = _message_texts(payload)
-            if role == "user" and (self.user_prompt_markers or self.user_prompt_drop):
-                texts = [self._cut_prompt(t) for t in texts]
+            if role == "user" and self.prompt_cleaner:
+                texts = [self.prompt_cleaner.clean(t) for t in texts]
             return "\n".join(f"[{when}] {role}: {t}" for t in texts)
         if kind in ("function_call", "custom_tool_call") and self.include_tool_calls:
             name = str(payload.get("name") or "?")
@@ -237,17 +227,6 @@ class CodexConnector:
             line = self._describe_call(name, args)
             return f"[{when}] {line}" if line else ""
         return ""
-
-    def _cut_prompt(self, text: str) -> str:
-        for marker in self.user_prompt_markers:
-            found = marker.search(text)
-            if found:
-                text = text[found.start() :]
-                break
-        if self.user_prompt_drop:
-            drop = self.user_prompt_drop
-            text = "\n".join(line for line in text.splitlines() if not drop.match(line))
-        return text
 
     def _describe_call(self, name: str, args: str) -> str | None:
         """One short line per call; polling and read-only inspection are dropped."""

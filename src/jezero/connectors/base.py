@@ -101,3 +101,37 @@ def project_from_cwd(cwd: str | None, aliases: dict[str, str] | None = None) -> 
             name = name.lower()
             return (aliases or {}).get(name, name)
     return None
+
+
+READ_ONLY_COMMAND = re.compile(
+    r"^\s*(sed -n|rg|grep|cat|head|tail|ls|nl|wc|find|pwd|tree|stat|file|which|"
+    r"git (status|diff|log|show|branch|rev-parse|ls-files))\b"
+)
+"""Shell commands that only inspect; connectors drop them unless asked to keep them."""
+
+
+class PromptCleaner:
+    """Strip instructions an orchestrator repeats at the top of every prompt.
+
+    Options: `user_prompt_markers` (keep a message only from the first marker on) and
+    `user_prompt_drop_lines` (drop fixed procedure lines that remain). Both are regexes.
+    """
+
+    def __init__(self, options: dict[str, Any]) -> None:
+        self.markers = [re.compile(m, re.MULTILINE) for m in options.get("user_prompt_markers", [])]
+        drop = options.get("user_prompt_drop_lines", [])
+        self.drop = re.compile("|".join(f"(?:{d})" for d in drop)) if drop else None
+
+    def __bool__(self) -> bool:
+        return bool(self.markers or self.drop)
+
+    def clean(self, text: str) -> str:
+        for marker in self.markers:
+            found = marker.search(text)
+            if found:
+                text = text[found.start() :]
+                break
+        if self.drop:
+            drop = self.drop
+            text = "\n".join(line for line in text.splitlines() if not drop.match(line))
+        return text

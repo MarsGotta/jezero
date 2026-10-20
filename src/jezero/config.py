@@ -65,6 +65,9 @@ class SummarizerConfig(_Strict):
     """Longer inputs are split into parts, each summarised on its own."""
     known_projects: list[str] = Field(default_factory=list)
     """Project slugs the summarizer should prefer when tagging items."""
+    output_language: str | None = None
+    """Write every summary in this language (e.g. "Spanish") so one query matches all
+    items. Default: the document's main language."""
 
 
 class ServerConfig(_Strict):

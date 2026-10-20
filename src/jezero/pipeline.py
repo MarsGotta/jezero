@@ -68,6 +68,15 @@ def build_connector(config: Config, conn: ConnectorConfig) -> Connector:
             max_segment_chars=config.summarizer.max_input_chars,
             default_project=conn.project,
         )
+    if conn.type == "opencode":
+        from .connectors.opencode import OpenCodeConnector
+
+        return OpenCodeConnector(
+            conn.name,
+            conn.options,
+            max_segment_chars=config.summarizer.max_input_chars,
+            default_project=conn.project,
+        )
     if conn.type == "paperclip":
         from .connectors.paperclip import PaperclipConnector
 

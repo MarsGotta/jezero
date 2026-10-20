@@ -28,3 +28,8 @@
   deleted comments skipped), documents and answered questions, read through the API with
   GET requests only. Entries are ordered by creation time so segments stay stable as an
   issue grows; quiet issues only.
+- OpenCode connector: sessions from `opencode.db` opened read-only; dialogue plus one
+  line per shell command or edited file, reasoning and read-only tools skipped.
+- `summarizer.output_language`: write every summary in one language, so a query in that
+  language also finds sessions held in another.
+- Prompt cleaning (`user_prompt_markers`, `user_prompt_drop_lines`) shared by connectors.

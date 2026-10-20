@@ -37,6 +37,7 @@ timeout_seconds = 120
 max_input_chars = 60000
 # Project slugs the summarizer should prefer when tagging items.
 known_projects = ["billing-api", "docs-site"]
+# output_language = "Spanish"   # one language for every summary; default: the document's
 
 [server]
 # Keep 127.0.0.1 and put a reverse proxy with TLS in front, or bind to a private
@@ -112,6 +113,19 @@ sessions_dir = "~/orchestrator/agents/*/codex-home/sessions"
 # user message only from this marker on, and drop fixed procedure lines that remain.
 user_prompt_markers = ['^## Wake Payload']
 user_prompt_drop_lines = ['^Execution contract:']
+
+[[connectors]]
+# OpenCode sessions from its SQLite store (read-only). Reasoning, tool output and
+# read-only tools are skipped; shell commands and edited files stay as one line each.
+name = "agent-opencode"
+type = "opencode"
+enabled = false
+interval_minutes = 15
+[connectors.options]
+db_path = "~/.local/share/opencode/opencode.db"
+skip_dir_globs = ["/tmp/*"]          # sessions to ignore by working directory
+min_chars = 400
+# user_prompt_markers / user_prompt_drop_lines work as in the codex connector
 
 [[connectors]]
 # Paperclip (agent orchestrator): issues with comments, documents and board decisions.
