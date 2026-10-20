@@ -31,7 +31,7 @@ CONNECTOR_TYPES: dict[str, ConnectorType] = {
         ),
         ConnectorType(
             "claude_code",
-            "planned",
+            "available",
             "Claude Code session transcripts (*.jsonl under a projects directory).",
         ),
         ConnectorType(

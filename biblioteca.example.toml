@@ -80,7 +80,12 @@ name = "agent-claude-code"
 type = "claude_code"
 interval_minutes = 15
 [connectors.options]
-projects_dir = "/path/to/.claude/projects"
+projects_dir = "~/.claude/projects"
+settle_minutes = 30
+include_subagents = false              # sub-agent transcripts; their final report is kept
+keep_results_of = ["Task", "Agent"]    # tool results worth keeping (truncated)
+min_chars = 400                        # skip trivial sessions (a lone slash command)
+# skip_entrypoints = ["sdk-cli"]       # e.g. skip sessions started by other programs
 
 [[connectors]]
 name = "agent-codex"
