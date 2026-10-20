@@ -176,6 +176,39 @@ def _run_selected(
     return status
 
 
+def cmd_retag(config: Config, args: argparse.Namespace) -> int:
+    """Re-apply the source's own project hints to stored items. No LLM calls."""
+    import fcntl
+
+    from .pipeline import build_connector
+    from .store import ConnectorState
+
+    conn = next((c for c in config.connectors if c.name == args.connector), None)
+    if conn is None:
+        print(f"error: no connector named {args.connector!r}", file=sys.stderr)
+        return 2
+    store = _store(config)
+    with config.db_path.with_suffix(".run.lock").open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(json.dumps({"skipped": "another run is in progress"}))
+            return 0
+        batch = build_connector(config, conn).collect(ConnectorState(name=conn.name))
+        changed = 0
+        for doc in batch.docs:
+            if not doc.project_hint:
+                continue
+            if args.dry_run:
+                current = store.project_of(conn.name, doc.external_id)
+                changed += int(current is not None and current != doc.project_hint)
+            else:
+                changed += int(store.set_project(conn.name, doc.external_id, doc.project_hint))
+    report = {"connector": conn.name, "docs": len(batch.docs), "retagged": changed}
+    print(json.dumps(report | {"dry_run": bool(args.dry_run)}))
+    return 0
+
+
 def cmd_health(config: Config, _: argparse.Namespace) -> int:
     from .watchdog import alert, evaluate, heartbeat
 
@@ -247,6 +280,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--due", action="store_true", help="only connectors whose interval_minutes has elapsed"
     )
     p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("retag", help="re-apply project hints from the source, without the LLM")
+    p.add_argument("--connector", required=True)
+    p.add_argument("--dry-run", action="store_true", help="count changes without writing")
+    p.set_defaults(fn=cmd_retag)
 
     sub.add_parser(
         "health", help="report stale or failing connectors (exit 1 if any); alert if set"

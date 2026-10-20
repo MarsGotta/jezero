@@ -278,6 +278,30 @@ class Store:
             ).fetchone()
         return row["content_hash"] if row else None
 
+    def project_of(self, source: str, external_id: str) -> str | None:
+        """Project tag of one item, or None if it is not stored."""
+        with self._read() as con:
+            row = con.execute(
+                "SELECT project FROM items WHERE source = ? AND external_id = ?",
+                (source, external_id),
+            ).fetchone()
+        return (row["project"] or "") if row else None
+
+    def set_project(self, source: str, external_id: str, project: str | None) -> bool:
+        """Change one item's project tag (items and FTS). True if it changed."""
+        with self._write() as con:
+            row = con.execute(
+                "SELECT id, project FROM items WHERE source = ? AND external_id = ?",
+                (source, external_id),
+            ).fetchone()
+            if row is None or row["project"] == project:
+                return False
+            con.execute("UPDATE items SET project = ? WHERE id = ?", (project, row["id"]))
+            con.execute(
+                "UPDATE items_fts SET project = ? WHERE rowid = ?", (project or "", row["id"])
+            )
+        return True
+
     def delete_source(self, source: str) -> int:
         with self._write() as con:
             ids = [r[0] for r in con.execute("SELECT id FROM items WHERE source = ?", (source,))]

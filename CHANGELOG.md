@@ -33,3 +33,6 @@
 - `summarizer.output_language`: write every summary in one language, so a query in that
   language also finds sessions held in another.
 - Prompt cleaning (`user_prompt_markers`, `user_prompt_drop_lines`) shared by connectors.
+- A project hint from the source (working directory, project field) now wins over the
+  model's guess. `jezero retag --connector NAME [--dry-run]` re-applies the hints to items
+  already stored, without calling the model.

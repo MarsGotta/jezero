@@ -121,3 +121,13 @@ def test_readonly_connection_cannot_write(store: Store) -> None:
     with pytest.raises(sqlite3.OperationalError):
         con.execute("DELETE FROM items")
     con.close()
+
+
+def test_set_project_updates_item_and_search_filter(store: Store) -> None:
+    store.upsert_many([make_item("e1", "Supervised tasks", "backoff for the hub worker")])
+    assert store.project_of("agent-test", "e1") == "demo"
+    assert store.set_project("agent-test", "e1", "atlas") is True
+    assert store.set_project("agent-test", "e1", "atlas") is False
+    assert store.set_project("agent-test", "missing", "atlas") is False
+    assert store.project_of("agent-test", "e1") == "atlas"
+    assert [h.item.project for h in search(store, "backoff", project="atlas")] == ["atlas"]

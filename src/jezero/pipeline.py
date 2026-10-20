@@ -155,7 +155,9 @@ async def run_connector(
                     summary=result.summary,
                     questions=result.questions,
                     atoms=result.atoms,
-                    project=result.project or doc.project_hint,
+                    # A hint from the source itself (working directory, project field)
+                    # beats the model's guess, which follows whatever the text mentions.
+                    project=doc.project_hint or result.project,
                     original=text,
                     original_ref=doc.original_ref,
                     trust=conn.trust,
