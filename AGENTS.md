@@ -29,9 +29,10 @@ server answers agents' queries. Python 3.12+, managed with uv.
 
 ```bash
 uv run pytest
-uv run ruff check src tests scripts
-uv run ruff format --check src tests scripts
+uv run ruff check src tests scripts clients
+uv run ruff format --check src tests scripts clients
 python3 scripts/privacy_check.py --all
+python3 scripts/build_clients.py && uv run --no-project --python 3.9 python dist/client/jezero_client.py --version
 ```
 
 ## Layout

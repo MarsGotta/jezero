@@ -55,11 +55,6 @@ CONNECTOR_TYPES: dict[str, ConnectorType] = {
             "Paperclip issues with comments, documents and decisions (read-only API).",
         ),
         ConnectorType(
-            "receiver",
-            "planned",
-            "HTTP endpoint that accepts sessions pushed by small emitters on other devices.",
-        ),
-        ConnectorType(
             "gmail",
             "planned",
             "Gmail threads through the API with the gmail.readonly scope.",

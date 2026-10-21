@@ -25,7 +25,11 @@ _SENSITIVE_NAME = (
 _NOT_A_VALUE = (
     r"(?![$<{%/\\(\[.*^|?+~`]|\[REDACTED|os\.|process\.env|getenv"
     r"|(?:true|false|null|none|yes|no)\b"
-    r"|[\d.*+/x-]+(?:[\s\"',;`)\]}]|$))"
+    r"|[\d.*+/x-]+(?:[\s\"',;`)\]}]|$)"
+    # code, not a value: a call, an attribute, a type name
+    r"|[A-Za-z_][\w.]*\(|self\.|this\."
+    r"|[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)+(?![\w.\-/+=])"
+    r"|(?:string|number|boolean|str|int|bool|bytes|undefined)\b)"
 )
 _SECRET_VALUE = (
     r"(?:\"" + _NOT_A_VALUE + r"(?!\s)[^\"\n]{6,}\"|'" + _NOT_A_VALUE + r"(?!\s)[^'\n]{6,}'"
@@ -54,12 +58,12 @@ _BUILTIN: tuple[tuple[str, str], ...] = (
         # (GITHUB_TOKEN, db_pass, clientSecret...). References are kept: $VAR, ${VAR}, <x>.
         "assignment",
         r"(?i)(?P<key>(?<![\w-])" + _SENSITIVE_NAME + r"(?![\w-])[\"']?)"
-        r"(?P<sep>\s*[:=]\s*)" + _SECRET_VALUE,
+        r"(?P<sep>[ \t]*[:=][ \t]*)" + _SECRET_VALUE,
     ),
     (
         # Command-line flags: --password X, --token=X.
         "assignment",
-        r"(?i)(?P<key>(?<![\w-])--" + _SENSITIVE_NAME + r")(?P<sep>=|\s+)" + _SECRET_VALUE,
+        r"(?i)(?P<key>(?<![\w-])--" + _SENSITIVE_NAME + r")(?P<sep>=|[ \t]+)" + _SECRET_VALUE,
     ),
     ("url_credentials", r"(?<=://)(?!\[REDACTED)[^/\s:@]+:[^/\s@]+(?=@)"),
 )

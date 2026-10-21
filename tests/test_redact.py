@@ -90,6 +90,12 @@ def test_more_secret_shapes(text: str) -> None:
         """data-cf-beacon='{"token": "<site-id>"}'""",
         "Missing bearer or basic authentication",
         "postgres://[REDACTED:url_credentials]@db/x",
+        "token = get_access_token()",
+        "if not token:\n    log.warning(x)",
+        '"x-api-key": self._key,',
+        "{ url: string; token: string }",
+        "API_KEY=\nTOKEN_X=",
+        "password: config.db_password",
     ],
 )
 def test_references_and_prose_are_kept(text: str) -> None:

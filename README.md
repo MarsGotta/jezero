@@ -22,8 +22,10 @@ it so they can be picked up later. That is the whole idea of this project.
 ```
 
 **Status: pre-alpha.** Storage, search, the MCP server, configuration, the summarizer,
-connectors for Hermes Agent, Claude Code, Codex, OpenCode, Antigravity and Paperclip, unattended runs and the watchdog are
-implemented and tested. Sessions from other devices and email come next.
+connectors for Hermes Agent, Claude Code, Codex, OpenCode, Antigravity and Paperclip,
+plugins that bring sessions from other computers, unattended runs and the watchdog are
+implemented and tested. Email comes next. How the pieces connect:
+[docs/architecture.md](docs/architecture.md).
 `jezero check-config` tells you which connector types are available in your version.
 
 ## Why this design
@@ -112,6 +114,11 @@ without printing their values.
 - Content written by third parties (email) is stored with `trust = "external"`, and the
   server instructions tell agents to treat it as data, never as instructions.
 - Search queries are always quoted before reaching FTS5, so they cannot inject operators.
+- Devices that upload sessions use their own key, created on the device; the server only
+  stores its SHA-256. An upload key can write only into its own inbox folder, and the
+  MCP server stays read-only. Uploaded transcripts are kept as sent on the server (like
+  the agents' own stores on each computer); redaction applies before summarising.
+- The plugin bundle at `/client/jezero-client.tar.gz` is public code and needs no key.
 
 See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
@@ -120,8 +127,8 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 ```bash
 uv sync
 uv run pytest
-uv run ruff check src tests scripts
-uv run ruff format --check src tests
+uv run ruff check src tests scripts clients
+uv run ruff format --check src tests scripts clients
 git config core.hooksPath .githooks   # enables the privacy pre-commit check
 python3 scripts/privacy_check.py --all
 ```
@@ -138,8 +145,8 @@ connectors that went quiet. Ready-made systemd user units and a cron line are in
 
 ## Roadmap
 
-1. A receiver plus small emitters for sessions on other devices.
-2. Gmail connector (read-only scope, per thread, newsletters skipped).
+1. Gmail connector (read-only scope, per thread, newsletters skipped).
+2. A folder watcher for agents without hooks (Antigravity, Cursor) on other computers.
 3. A retrieval benchmark command (questions with expected hits, top-k accuracy).
 4. Optional vector search with sqlite-vec.
 

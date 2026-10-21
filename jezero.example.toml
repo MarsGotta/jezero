@@ -155,13 +155,8 @@ board_name = "board"              # how human comments are attributed
 settle_minutes = 30               # wait until an issue is quiet before summarising it
 # project_map = { "Shop app" = "shop" }   # Paperclip project name -> project slug
 
-[[connectors]]
-# Receives sessions pushed by small emitters on other devices.
-name = "agent-devices"
-type = "receiver"
-[connectors.options]
-listen = "127.0.0.1:8766"
-emitter_token_env = "JEZERO_EMITTER_TOKEN"
+# Sessions from other computers arrive through the Jezero plugins (clients/README.md):
+# `jezero device approve NAME SHA256` adds the device and its inbox connectors here.
 
 [[connectors]]
 name = "mail-personal"

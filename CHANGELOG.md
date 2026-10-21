@@ -50,6 +50,10 @@
   instructions now tell agents that decisions change and to check `later` before answering
   with a decision, plan or status. Each item summarises one session, so nothing else marks
   a decision as superseded.
+- Open-source readiness: CI workflow (lint, tests, privacy check, Python 3.9 client
+  check), `docs/architecture.md`, plugin manifests under Apache-2.0 like the project, the
+  obsolete `receiver` connector type removed (the device inbox replaces it), redaction no
+  longer hides code such as `token = get_access_token()`, neutral names in tests.
 - Project detection without assumptions about folder names (`jezero.projects`, shared
   by the connectors and the device client): configured `[projects] paths` first, then the
   git repository (the main repository for worktrees), then common root folders
