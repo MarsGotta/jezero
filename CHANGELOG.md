@@ -59,6 +59,8 @@
   OpenCode's skills folder.
 - `init --no-upload` for computers that only read Jezero (the server's own computer).
 - Client 0.3.1: `status` on a read-only computer checks reading, not uploading.
+- Client 0.3.4: `setup --agent antigravity` registers the MCP server and the skill in
+  `~/.gemini/config` (app, IDE and CLI). Guide: `docs/antigravity.md`.
 - Client 0.3.3: the OpenCode plugin also finds a key in `<OpenCode config>/jezero`.
 - Client 0.3.2: sandboxed agents keep their own key in `<agent config>/jezero`
   (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), used when `JEZERO_CLIENT_HOME` is not set.

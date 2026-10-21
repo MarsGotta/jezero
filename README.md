@@ -138,7 +138,8 @@ codex plugin marketplace add MarsGotta/jezero    # then install Jezero from /plu
 hermes plugins install MarsGotta/jezero/plugins/hermes --enable
 ```
 
-OpenCode loads the folder `plugins/opencode` (or `setup` installs it for you).
+OpenCode loads the folder `plugins/opencode` (or `setup` installs it for you). Antigravity gets the
+MCP server and the skill with one command: see [docs/antigravity.md](docs/antigravity.md).
 
 They stay quiet until the computer is connected to your server with
 `jezero_client.py init` (step 2 in the clients guide).

@@ -42,7 +42,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.3.3"
+VERSION = "0.3.4"
 AGENT_HOME_VARS = ("CLAUDE_CONFIG_DIR", "CODEX_HOME")
 
 
@@ -68,6 +68,8 @@ STATE = HOME / "state.json"
 LOG = HOME / "client.log"
 CA_FILE = HOME / "ca.pem"
 AGENTS = ("claude-code", "codex", "opencode", "hermes")
+SETUP_AGENTS = (*AGENTS, "antigravity")
+"""`setup` also knows Antigravity (MCP server and skill; it has no session hooks yet)."""
 
 HOOK_TIMEOUT = float(os.environ.get("JEZERO_HOOK_TIMEOUT", "2.5"))
 STOP_THROTTLE_SECONDS = 15 * 60
@@ -797,6 +799,62 @@ def _setup_opencode(plugin_source: Path | None) -> str:
     return f"opencode: plugin (with the MCP server and the skill) installed in {target}"
 
 
+def _skill_source() -> Path | None:
+    """The shared SKILL.md shipped near this file: in a plugin, the bundle or the repo."""
+    here = Path(__file__).resolve().parent
+    for candidate in (
+        here.parent / "skills",  # plugins/<agent>/core/jezero_client.py
+        here / "skills",
+        here / "claude-code" / "skills",  # root of the server's client bundle
+        here.parent / "skill",  # clients/core in the repository
+    ):
+        skill = (
+            candidate / "jezero" / "SKILL.md"
+            if candidate.name == "skills"
+            else candidate / "SKILL.md"
+        )
+        if skill.is_file():
+            return skill
+    return None
+
+
+def _setup_antigravity(cfg: dict[str, Any]) -> str:
+    """Antigravity (app, IDE and CLI) reads MCP servers and skills from ~/.gemini/config."""
+    gemini = Path.home() / ".gemini"
+    if not gemini.exists() and not shutil.which("agy"):
+        return "antigravity: not found, skipped"
+    base = gemini / "config"
+    path = base / "mcp_config.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8") or "{}") if path.exists() else {}
+    except ValueError:
+        return f"antigravity: {path} is not valid JSON, left untouched"
+    servers = data.setdefault("mcpServers", {}) if isinstance(data, dict) else None
+    if not isinstance(servers, dict):
+        return f"antigravity: unexpected content in {path}, left untouched"
+    if "jezero" in servers:
+        status = "MCP server jezero already registered"
+    else:
+        servers["jezero"] = {
+            "serverUrl": cfg["url"].rstrip("/") + "/mcp",
+            "headers": {"Authorization": f"Bearer {cfg['token']}"},
+        }
+        base.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        with contextlib.suppress(OSError):
+            os.chmod(tmp, 0o600)  # it holds the key
+        os.replace(tmp, path)
+        status = "MCP registered"
+    skill = _skill_source()
+    if skill:
+        target = base / "skills" / "jezero" / "SKILL.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(str(skill), str(target))
+        status += " and skill installed"
+    return f"antigravity: {status} ({base})"
+
+
 def setup(agents: list[str], opencode_plugin: str | None) -> int:
     cfg = load_config()
     if not cfg:
@@ -810,6 +868,8 @@ def setup(agents: list[str], opencode_plugin: str | None) -> int:
         elif agent == "opencode":
             source = Path(opencode_plugin) if opencode_plugin else None
             print(_setup_opencode(source))
+        elif agent == "antigravity":
+            print(_setup_antigravity(cfg))
         elif agent == "hermes":
             print(
                 "hermes: install the plugin with `hermes plugins install "
@@ -902,7 +962,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("status", help="check the key with the server and show the queue")
     p = sub.add_parser("setup", help="register the Jezero MCP server in the agents")
-    p.add_argument("--agent", action="append", choices=AGENTS)
+    p.add_argument("--agent", action="append", choices=SETUP_AGENTS)
     p.add_argument("--opencode-plugin", help="path to jezero.ts to install for OpenCode")
     p = sub.add_parser("hook", help="run a hook (reads the agent's JSON on stdin)")
     p.add_argument("event", choices=["session-start", "user-prompt", "stop", "session-end"])
@@ -920,7 +980,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "status":
         return status()
     if args.command == "setup":
-        return setup(args.agent or list(AGENTS), args.opencode_plugin)
+        return setup(args.agent or list(SETUP_AGENTS), args.opencode_plugin)
     if args.command == "hook":
         text = hook(args.event, args.agent, _read_payload())
         if text:

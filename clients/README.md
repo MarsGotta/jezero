@@ -75,6 +75,8 @@ errors only go to `~/.jezero/client.log`.
    - Hermes Agent: `hermes plugins install MarsGotta/jezero/plugins/hermes --enable`, then
      restart the gateway. The tools appear once step 2 is done; the plugin carries its
      own copy of the core. Older sessions: `jezero_client.py backfill --agent hermes`.
+   - Antigravity (app, IDE and CLI): no plugin yet; `setup --agent antigravity` adds the
+     MCP server and the skill. Step by step in [docs/antigravity.md](../docs/antigravity.md).
 
 5. Optional: send the sessions already on this computer.
 
