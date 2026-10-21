@@ -14,5 +14,7 @@
     "context"
   ],
   "skills": "./skills/",
-  "hooks": "./hooks/hooks.json"
+  "hooks": "./hooks/hooks.json",
+  "homepage": "https://github.com/MarsGotta/jezero",
+  "repository": "https://github.com/MarsGotta/jezero"
 }

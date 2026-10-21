@@ -24,6 +24,12 @@ dependencies = [
     "zstandard>=0.22",
 ]
 
+[project.urls]
+Homepage = "https://github.com/MarsGotta/jezero"
+Repository = "https://github.com/MarsGotta/jezero"
+Issues = "https://github.com/MarsGotta/jezero/issues"
+Changelog = "https://github.com/MarsGotta/jezero/blob/main/CHANGELOG.md"
+
 [project.scripts]
 jezero = "jezero.cli:main"
 

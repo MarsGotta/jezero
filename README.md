@@ -50,6 +50,7 @@ Requires Python 3.12+, SQLite 3.45+ (bundled with recent Python builds) and
 [uv](https://docs.astral.sh/uv/).
 
 ```bash
+git clone https://github.com/MarsGotta/jezero.git && cd jezero
 uv sync
 cp jezero.example.toml jezero.toml   # then edit it
 uv run jezero check-config
