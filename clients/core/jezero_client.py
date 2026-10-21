@@ -36,7 +36,7 @@ import urllib.request
 from pathlib import Path, PurePath
 from typing import Any
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 HOME = Path(os.environ.get("JEZERO_CLIENT_HOME", "~/.jezero")).expanduser()
 CONFIG = HOME / "client.json"
 TOKEN_FILE = HOME / "token"
