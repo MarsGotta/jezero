@@ -10,6 +10,28 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+# Key names that hold a secret: `GITHUB_TOKEN`, `db_password`, `clientSecret`, `DB_PASS`.
+# Bare `pass`, `auth`, `pwd` or `credentials` are left alone: in sessions they are test
+# results ("3 tests PASS"), `OAuth`, the working directory and `persist-credentials`.
+_SENSITIVE_NAME = (
+    r"(?:(?:[\w-]*[_-]|access|refresh|bearer|client|session|private)?"
+    r"(?:api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|secret|token|"
+    r"password|passwd)"
+    r"|[\w-]*[_-](?:pass|pwd|auth)"
+    r"|(?-i:[A-Z][A-Z0-9]*(?:PASSWORD|PASSWD|SECRET|TOKEN)))"
+)
+# A value worth hiding: not a reference ($VAR, $(cmd), <placeholder>, os.environ...), not
+# a path or a pattern, not a boolean.
+_NOT_A_VALUE = (
+    r"(?![$<{%/\\(\[.*^|?+~`]|\[REDACTED|os\.|process\.env|getenv"
+    r"|(?:true|false|null|none|yes|no)\b"
+    r"|[\d.*+/x-]+(?:[\s\"',;`)\]}]|$))"
+)
+_SECRET_VALUE = (
+    r"(?:\"" + _NOT_A_VALUE + r"(?!\s)[^\"\n]{6,}\"|'" + _NOT_A_VALUE + r"(?!\s)[^'\n]{6,}'"
+    r"|" + _NOT_A_VALUE + r"[^\s\"',;`)\]}]{6,})"
+)
+
 _BUILTIN: tuple[tuple[str, str], ...] = (
     ("private_key", r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"),
     ("anthropic_key", r"\bsk-ant-[A-Za-z0-9_\-]{16,}"),
@@ -20,12 +42,26 @@ _BUILTIN: tuple[tuple[str, str], ...] = (
     ("google_api_key", r"\bAIza[0-9A-Za-z_\-]{35}\b"),
     ("jwt", r"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}"),
     ("bearer", r"(?i)\bbearer\s+[A-Za-z0-9._~+/\-]{16,}=*"),
+    ("gitlab_token", r"\bglpat-[A-Za-z0-9_\-]{20,}"),
+    ("npm_token", r"\bnpm_[A-Za-z0-9]{36}\b"),
+    ("huggingface_token", r"\bhf_[A-Za-z0-9]{30,}\b"),
+    ("stripe_key", r"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}"),
+    ("basic_auth", r"\b[Bb]asic\s+(?=[A-Za-z0-9+/]*[0-9+/=])[A-Za-z0-9+/]{12,}=*"),
+    ("azure_key", r"(?i)\b(?:AccountKey|SharedAccessKey|SharedAccessSignature)=[^;\s\"']{8,}"),
+    ("url_signature", r"(?i)(?<=[?&])(?:sig|signature|access_token|api_?key)=[^&\s\"'#]{8,}"),
     (
+        # `NAME=value`, `"name": "value"`, `name: value` where NAME ends in a secret word
+        # (GITHUB_TOKEN, db_pass, clientSecret...). References are kept: $VAR, ${VAR}, <x>.
         "assignment",
-        r"(?i)\b(?:api[_-]?key|secret|token|password|passwd|pwd|auth)\b"
-        r"(\s*[:=]\s*)(?:\"[^\"\n]{6,}\"|'[^'\n]{6,}'|[^\s\"',;]{6,})",
+        r"(?i)(?P<key>(?<![\w-])" + _SENSITIVE_NAME + r"(?![\w-])[\"']?)"
+        r"(?P<sep>\s*[:=]\s*)" + _SECRET_VALUE,
     ),
-    ("url_credentials", r"(?<=://)[^/\s:@]+:[^/\s@]+(?=@)"),
+    (
+        # Command-line flags: --password X, --token=X.
+        "assignment",
+        r"(?i)(?P<key>(?<![\w-])--" + _SENSITIVE_NAME + r")(?P<sep>=|\s+)" + _SECRET_VALUE,
+    ),
+    ("url_credentials", r"(?<=://)(?!\[REDACTED)[^/\s:@]+:[^/\s@]+(?=@)"),
 )
 
 
@@ -56,7 +92,4 @@ class Redactor:
 
 def _keep_key(match: re.Match[str]) -> str:
     """For `key = value` keep the key and separator so the text stays readable."""
-    whole = match.group(0)
-    sep = match.group(1)
-    key = whole[: whole.index(sep)]
-    return f"{key}{sep}[REDACTED:assignment]"
+    return f"{match.group('key')}{match.group('sep')}[REDACTED:assignment]"

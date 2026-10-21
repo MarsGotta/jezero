@@ -235,6 +235,22 @@ def cmd_resummarize(config: Config, args: argparse.Namespace) -> int:
     return 1 if report.failed else 0
 
 
+def cmd_redact_stored(config: Config, args: argparse.Namespace) -> int:
+    """Re-apply the current redaction rules to items already stored (no LLM calls)."""
+    redactor = Redactor(config.redaction.extra_patterns, enabled=config.redaction.enabled)
+
+    def redact(text: str) -> tuple[str, int]:
+        result = redactor.redact(text)
+        return result.text, result.count
+
+    store = Store(config.db_path)
+    store.init()
+    items, total = store.redact_stored(redact, dry_run=args.dry_run)
+    verb = "would redact" if args.dry_run else "redacted"
+    print(f"{verb} {total} secrets in {items} items")
+    return 0
+
+
 def cmd_device_approve(config: Config, args: argparse.Namespace) -> int:
     """Register a device key (its SHA-256 digest) and its inbox connectors (disabled)."""
     import fnmatch
@@ -367,6 +383,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--due", action="store_true", help="only connectors whose interval_minutes has elapsed"
     )
     p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("redact-stored", help="apply the current redaction rules to stored items")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(fn=cmd_redact_stored)
 
     p = sub.add_parser("device", help="devices that upload sessions (Jezero plugins)")
     dsub = p.add_subparsers(dest="device_command", required=True)

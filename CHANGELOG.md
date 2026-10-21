@@ -50,6 +50,12 @@
   instructions now tell agents that decisions change and to check `later` before answering
   with a decision, plan or status. Each item summarises one session, so nothing else marks
   a decision as superseded.
+- Stronger redaction: env-style names ending in a secret word (`GITHUB_TOKEN=`,
+  `PGPASSWORD=`, `db_pass=`), quoted JSON keys, `--password X` flags, Basic auth, GitLab,
+  npm, Hugging Face and Stripe tokens, Azure keys and signed URLs. References (`$VAR`,
+  `<placeholder>`, paths) and prose (`tests PASS`, `OAuth`, `persist-credentials`) are kept.
+  `jezero redact-stored [--dry-run]` applies the rules to items already stored.
+- `jezero device approve --source-prefix/--read-only`.
 - Plugins for Claude Code, Codex and OpenCode (`clients/`), thin adapters over one shared
   core (`clients/core/jezero_client.py`, Python 3.9+, standard library only). They add a
   short protocol and the project's recent work at session start, related past work on the

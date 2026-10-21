@@ -45,3 +45,52 @@ def test_custom_pattern_and_disabled() -> None:
 def test_plain_text_untouched() -> None:
     text = "We decided to keep the index in one SQLite file."
     assert Redactor().redact(text).text == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "export GITHUB_TOKEN=abcd1234efgh5678ijkl",
+        "DATABASE_PASSWORD=Sup3rS3cret!x",
+        "export PGPASSWORD=examplepw",
+        "CLIENT_SECRET: 9f8e7d6c5b4a3210zz",
+        "TF_VAR_db_pass=abcdef123",
+        '{"accessToken":"abc123def456ghi"}',
+        '"apiKey": "not-a-real-key-123"',
+        "--password hunter2222",
+        "--token=abcdef123456",
+        "Authorization: Basic dXNlcjpwYXNzd29yZDEyMw==",
+        "glpat-AbCdEfGhIjKlMnOpQrSt",
+        "AccountName=x;AccountKey=AbCd/EfGh+IjKl==;EndpointSuffix=core.windows.net",
+        "https://x.example/c?sv=2022&sig=AbCdEf%2BGhIjKl%3D",
+    ],
+)
+def test_more_secret_shapes(text: str) -> None:
+    assert Redactor().redact(text).count >= 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "TOKEN=$GITHUB_TOKEN",
+        'token_env = "JEZERO_TOKEN"',
+        "GITHUB_TOKEN_FILE=/run/secrets/x",
+        "max_tokens=409600",
+        "author: Jane Doe",
+        "tokens: 128000 de contexto",
+        "password = os.environ['DB']",
+        "--token-file /tmp/tok.txt",
+        "secret = ${SECRET_VALUE}",
+        "3 tests PASS: 12 ok",
+        "persist-credentials: false",
+        "OAuth: configured",
+        "pwd: /home/user/x",
+        "kv_bytes_per_token = 2*1024",
+        "(ALL) NOPASSWD: /usr/bin/systemctl",
+        """data-cf-beacon='{"token": "<site-id>"}'""",
+        "Missing bearer or basic authentication",
+        "postgres://[REDACTED:url_credentials]@db/x",
+    ],
+)
+def test_references_and_prose_are_kept(text: str) -> None:
+    assert Redactor().redact(text).count == 0

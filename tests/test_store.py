@@ -131,3 +131,23 @@ def test_set_project_updates_item_and_search_filter(store: Store) -> None:
     assert store.set_project("agent-test", "missing", "atlas") is False
     assert store.project_of("agent-test", "e1") == "atlas"
     assert [h.item.project for h in search(store, "backoff", project="atlas")] == ["atlas"]
+
+
+def test_redact_stored_rewrites_items_and_index(tmp_path) -> None:
+    from jezero.redact import Redactor
+
+    store = Store(tmp_path / "lib.db")
+    store.init()
+    store.upsert(make_item("r1", "Deploy notes", "export GITHUB_TOKEN=abcd1234efgh5678ijkl ran"))
+    redactor = Redactor()
+
+    def redact(text: str) -> tuple[str, int]:
+        result = redactor.redact(text)
+        return result.text, result.count
+
+    assert store.redact_stored(redact, dry_run=True) == (1, 1)
+    assert store.search("abcd1234efgh5678ijkl")
+    assert store.redact_stored(redact, dry_run=False) == (1, 1)
+    assert not store.search("abcd1234efgh5678ijkl")
+    assert store.search("Deploy notes")
+    assert store.redact_stored(redact, dry_run=False) == (0, 0)

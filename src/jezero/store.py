@@ -12,7 +12,7 @@ import fnmatch
 import json
 import re
 import sqlite3
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -302,6 +302,72 @@ class Store:
                 "UPDATE items_fts SET project = ? WHERE rowid = ?", (project or "", row["id"])
             )
         return True
+
+    def redact_stored(
+        self, redact: Callable[[str], tuple[str, int]], *, dry_run: bool
+    ) -> tuple[int, int]:
+        """Apply a (newer) redactor to everything already stored, without re-summarising.
+
+        `redact(text) -> (text, count)`. Rewrites title, summary, questions, atom texts and
+        the stored original, and keeps the FTS mirror in sync. Returns (items, redactions).
+        """
+        changed_items = total = 0
+        with self._write() as con:
+            rows = con.execute(
+                "SELECT id, title, summary, questions, atoms, project, original FROM items"
+            ).fetchall()
+            for row in rows:
+                count = 0
+
+                def clean(text: str | None) -> str | None:
+                    nonlocal count
+                    if not text:
+                        return text
+                    new, n = redact(text)
+                    count += n
+                    return new
+
+                title, summary, original = (clean(row[k]) for k in ("title", "summary", "original"))
+                questions = [clean(q) for q in json.loads(row["questions"] or "[]")]
+                atoms = json.loads(row["atoms"] or "[]")
+                for atom in atoms:
+                    if isinstance(atom, dict) and isinstance(atom.get("text"), str):
+                        atom["text"] = clean(atom["text"])
+                if not count:
+                    continue
+                changed_items += 1
+                total += count
+                if dry_run:
+                    continue
+                con.execute(
+                    "UPDATE items SET title = ?, summary = ?, questions = ?, atoms = ?, "
+                    "original = ? WHERE id = ?",
+                    (
+                        title,
+                        summary,
+                        json.dumps(questions, ensure_ascii=False),
+                        json.dumps(atoms, ensure_ascii=False),
+                        original,
+                        row["id"],
+                    ),
+                )
+                con.execute("DELETE FROM items_fts WHERE rowid = ?", (row["id"],))
+                con.execute(
+                    "INSERT INTO items_fts (rowid, title, summary, questions, atoms, project) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        row["id"],
+                        title,
+                        summary,
+                        "\n".join(q or "" for q in questions),
+                        "\n".join(
+                            str(a.get("text") or "") if isinstance(a, dict) else str(a)
+                            for a in atoms
+                        ),
+                        row["project"] or "",
+                    ),
+                )
+        return changed_items, total
 
     def delete_source(self, source: str) -> int:
         with self._write() as con:
