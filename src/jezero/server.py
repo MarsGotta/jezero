@@ -12,7 +12,7 @@ import hmac
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -162,7 +162,8 @@ def _parse_dt(value: str | None, field: str) -> datetime | None:
     except ValueError as exc:
         raise ValueError(f"{field} must be an ISO 8601 date or datetime") from exc
     if parsed.tzinfo is None:
-        raise ValueError(f"{field} must include a timezone offset, e.g. 2026-01-31T00:00:00Z")
+        # Agents often send a bare date ("2026-01-31"): read it as UTC rather than fail.
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed
 
 
@@ -215,7 +216,8 @@ def build_server(config: Config, store: Store | None = None) -> tuple[MCPServer,
         limit: int | None = None,
     ) -> dict[str, Any]:
         """Search the library. Words are matched literally (accents ignored); recent items rank
-        higher. Optional filters: project, source, since (ISO datetime with timezone)."""
+        higher. Optional filters: project, source, since (ISO date or datetime, UTC if no
+        offset)."""
         who = principal()
         size = min(limit or search_cfg.default_limit, search_cfg.max_limit)
         hits = store.search(
@@ -273,7 +275,7 @@ def build_server(config: Config, store: Store | None = None) -> tuple[MCPServer,
         limit: int = 20,
     ) -> dict[str, Any]:
         """Items in reverse chronological order, optionally filtered by project, source and
-        a [since, until) period (ISO datetimes with timezone)."""
+        a [since, until) period (ISO dates or datetimes; UTC if no offset)."""
         items = store.timeline(
             allowed_sources=principal().sources,
             project=project,

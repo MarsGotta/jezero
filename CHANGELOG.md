@@ -59,6 +59,7 @@
   OpenCode's skills folder.
 - `init --no-upload` for computers that only read Jezero (the server's own computer).
 - Client 0.3.1: `status` on a read-only computer checks reading, not uploading.
+- `since`/`until` accept a bare date or a datetime without offset (read as UTC).
 - Connectors register themselves: each module declares a `CONNECTOR_TYPE` with its
   `build` function and is discovered automatically; other packages can add connectors
   through the `jezero.connectors` entry point group. Adding a connector is one file.

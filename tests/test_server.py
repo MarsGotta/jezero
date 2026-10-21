@@ -170,6 +170,11 @@ def test_get_item_and_timeline(server_url: str) -> None:
     assert full["found"] and full["item"]["title"] == "Mail thread"
     timeline = call(server_url, AGENT_TOKEN, "timeline", {})
     assert [i["source"] for i in timeline["items"]] == ["agent-x"]
+    # A bare date, as agents often send it, is read as UTC instead of failing.
+    dated = call(
+        server_url, AGENT_TOKEN, "timeline", {"since": "2000-01-01", "until": "2999-01-01"}
+    )
+    assert [i["source"] for i in dated["items"]] == ["agent-x"]
 
 
 def test_later_finds_the_decision_that_replaced_an_earlier_one(tmp_path) -> None:
