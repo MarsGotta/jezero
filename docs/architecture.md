@@ -4,6 +4,11 @@ Jezero is one server and a set of thin clients. Sessions flow from left to right
 are read (or uploaded), cleaned, summarised once, stored in a single SQLite file and then
 read by any number of agents over MCP.
 
+![Architecture](architecture.svg)
+
+The same flow as a Mermaid graph (regenerate the picture with
+`python3 docs/make_architecture.py`):
+
 ```mermaid
 flowchart LR
   subgraph here["On the server's computer"]

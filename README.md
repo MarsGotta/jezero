@@ -2,6 +2,11 @@
 
 **A shared, searchable library of your agents' past work.**
 
+[![ci](https://github.com/MarsGotta/jezero/actions/workflows/ci.yml/badge.svg)](https://github.com/MarsGotta/jezero/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
+[![MCP](https://img.shields.io/badge/MCP-read--only-6a3ec0.svg)](https://modelcontextprotocol.io)
+
 Your agents forget. Their sessions pile up as gigabytes of transcripts on several
 machines, and your email holds decisions nobody wrote down anywhere else. Jezero
 collects those sources, turns each session or thread into a short summary plus
@@ -9,23 +14,55 @@ collects those sources, turns each session or thread into a short summary plus
 risks), and serves it all, read-only, to every agent you run over
 [MCP](https://modelcontextprotocol.io).
 
+<p align="center">
+  <img src="docs/architecture.svg" width="100%"
+       alt="Sessions from agents on the server and from other computers go through connectors, redaction and a summariser into one SQLite library, which agents query over a read-only MCP server.">
+</p>
+
+Sessions flow from left to right: read on the server (or uploaded by a plugin from other
+computers), cleaned, summarised once, stored in one SQLite file, then read by any number
+of agents. More detail in [docs/architecture.md](docs/architecture.md).
+
+## What it looks like
+
+You ask an agent about something another agent did weeks ago, on another computer. You
+do not mention Jezero; the plugin taught it to look:
+
+```text
+you    > What did we end up doing with analytics on the shop site?
+
+agent  · search("analytics shop site")
+           [412] 2026-09-03  Shop site: remove the analytics script
+           [431] 2026-09-10  Shop site: analytics back, only after consent
+agent  · later(412, "analytics")
+           [431] newer, same subject
+
+agent  > It changed once. On 3 Sep the script was removed [412]; on 10 Sep it came
+         back, loaded only after the visitor accepts the consent banner [431].
+         That is the current state.
+```
+
+Each item is a summary with atoms, the date it happened and its project:
+
+```text
+[431] Shop site: analytics back, only after consent        2026-09-10 · shop
+summary   The analytics script returns, loaded only after consent. No cookies before.
+atoms     decision  Load analytics only after the visitor accepts the banner.
+          why       Consent is required before any tracking.
+          fix       The banner test ran before the script loaded; wait for the event.
+          command   npm run test:consent
+```
+
+(Synthetic example. Jezero never ships real transcripts.)
+
 *The name:* Jezero is the Martian crater that once held a lake. Its layered sediments
 keep the record of what happened there, and the Perseverance rover sets samples aside in
 it so they can be picked up later. That is the whole idea of this project.
 
-```
- sources          connectors         pipeline                    store            access
- agent sessions ─┐                                                                ┌─ agent A
- other devices  ─┼─> incremental ──> redact secrets ──> summary ──> SQLite ──> MCP ┼─ agent B
- email (opt-in) ─┘   read-only       mark external      questions   + FTS5   read- └─ ...
-                     hashed          content            atoms       one file only
-```
-
 **Status: pre-alpha.** Storage, search, the MCP server, configuration, the summarizer,
 connectors for Hermes Agent, Claude Code, Codex, OpenCode, Antigravity and Paperclip,
 plugins that bring sessions from other computers, unattended runs and the watchdog are
-implemented and tested. Email comes next. How the pieces connect:
-[docs/architecture.md](docs/architecture.md).
+implemented and tested. Email comes next.
 `jezero check-config` tells you which connector types are available in your version.
 
 ## Why this design
