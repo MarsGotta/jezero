@@ -193,3 +193,10 @@ def test_certificate_failure_exports_system_roots_and_retries(
     with pytest.raises(urllib.error.URLError):
         core._http("GET", "https://lib.example/inbox/v1/ping", "t")
     assert len(calls) == 1
+
+
+def test_project_folder_is_case_insensitive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    core = load_core(tmp_path / "home", monkeypatch)
+    assert core.project_from_cwd("/Users/me/Projects/Billing/web") == "billing"

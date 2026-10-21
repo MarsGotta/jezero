@@ -98,7 +98,7 @@ def project_from_cwd(cwd: str | None, aliases: dict[str, str] | None = None) -> 
         return None
     parts = PurePath(cwd).parts
     for i, part in enumerate(parts[:-1]):
-        if part == "projects":
+        if part.lower() == "projects":
             name = parts[i + 1]
             if not _NAME.match(name) or _UUIDISH.match(name) or name in _IGNORED_DIR_NAMES:
                 continue

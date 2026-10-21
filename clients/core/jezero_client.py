@@ -36,7 +36,7 @@ import urllib.request
 from pathlib import Path, PurePath
 from typing import Any
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 HOME = Path(os.environ.get("JEZERO_CLIENT_HOME", "~/.jezero")).expanduser()
 CONFIG = HOME / "client.json"
 TOKEN_FILE = HOME / "token"
@@ -235,7 +235,7 @@ def project_from_cwd(cwd: str | None) -> str | None:
         return None
     parts = PurePath(cwd).parts
     for i, part in enumerate(parts[:-1]):
-        if part == "projects":
+        if part.lower() == "projects":
             name = parts[i + 1]
             if _NAME.match(name) and not _UUIDISH.match(name) and name not in _IGNORED:
                 return name.lower()
