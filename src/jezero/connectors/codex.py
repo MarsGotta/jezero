@@ -19,7 +19,7 @@ import time
 from datetime import UTC, datetime
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from ..store import ConnectorState
 from .base import READ_ONLY_COMMAND, Batch, PromptCleaner, RawDoc, project_from_cwd, segment
@@ -89,7 +89,7 @@ class CodexConnector:
         cursor = float(state.cursor) if state.cursor and sample is None else 0.0
         candidates = []
         for root in roots:
-            for path in root.rglob("*.jsonl"):
+            for path in (*root.rglob("*.jsonl"), *root.rglob("*.jsonl.zst")):
                 try:
                     mtime = path.stat().st_mtime
                 except FileNotFoundError:
@@ -143,7 +143,7 @@ class CodexConnector:
         meta: dict[str, Any] | None = None
         blocks: list[tuple[int, float, str]] = []
         try:
-            handle = path.open(encoding="utf-8", errors="replace")
+            handle = open_text(path)
         except FileNotFoundError:
             return [], False
         with handle:
@@ -287,3 +287,16 @@ def _unescape(value: str) -> str:
         return json.loads(f'"{value}"')
     except json.JSONDecodeError:
         return value
+
+
+def open_text(path: Path) -> IO[str]:
+    """Open a rollout as text; newer Codex builds compress them (`.jsonl.zst`)."""
+    if path.suffix != ".zst":
+        return path.open(encoding="utf-8", errors="replace")
+    import io
+
+    import zstandard
+
+    raw = path.open("rb")
+    stream = zstandard.ZstdDecompressor().stream_reader(raw, closefd=True)
+    return io.TextIOWrapper(stream, encoding="utf-8", errors="replace")

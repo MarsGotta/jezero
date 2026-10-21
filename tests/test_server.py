@@ -43,7 +43,14 @@ def server_url(tmp_path, monkeypatch) -> Iterator[str]:
             "clients": [
                 {"name": "agent", "token_env": "TEST_AGENT_TOKEN", "sources": ["agent-*"]},
                 {"name": "admin", "token_sha256": hashlib.sha256(ADMIN_TOKEN.encode()).hexdigest()},
+                {
+                    "name": "laptop",
+                    "token_sha256": hashlib.sha256(DEVICE_TOKEN.encode()).hexdigest(),
+                    "sources": ["agent-*"],
+                    "upload": True,
+                },
             ],
+            "inbox": {"dir": str(tmp_path / "inbox"), "max_mb": 0.01},
         }
     )
     store = Store(config.db_path)
@@ -82,6 +89,56 @@ async def _call(url: str, token: str | None, tool: str, args: dict) -> dict:
 
 def call(url: str, token: str | None, tool: str, args: dict | None = None) -> dict:
     return asyncio.run(_call(url, token, tool, args or {}))
+
+
+DEVICE_TOKEN = "device-token-for-tests"
+
+
+def _base(url: str) -> str:
+    return url.rsplit("/mcp", 1)[0]
+
+
+def test_inbox_ping_and_upload(server_url: str, tmp_path) -> None:
+    import gzip
+
+    base = _base(server_url)
+    auth = {"Authorization": f"Bearer {DEVICE_TOKEN}"}
+    assert httpx2.get(f"{base}/inbox/v1/ping").status_code == 401
+    assert (
+        httpx2.get(f"{base}/inbox/v1/ping", headers={"Authorization": "Bearer x"}).status_code
+        == 401
+    )
+    agent = {"Authorization": f"Bearer {AGENT_TOKEN}"}
+    assert httpx2.get(f"{base}/inbox/v1/ping", headers=agent).status_code == 403
+    assert httpx2.get(f"{base}/inbox/v1/ping", headers=auth).json()["device"] == "laptop"
+
+    url = f"{base}/inbox/v1/claude-code/projects/-w-proj/abc-123.jsonl"
+    r = httpx2.put(url, content=b'{"type":"user"}\n', headers=auth)
+    assert r.status_code == 200, r.text
+    target = (
+        tmp_path / "inbox" / "laptop" / "claude-code" / "projects" / "-w-proj" / "abc-123.jsonl"
+    )
+    assert target.read_bytes() == b'{"type":"user"}\n'
+    body = gzip.compress(b'{"type":"assistant"}\n')
+    r = httpx2.put(url, content=body, headers={**auth, "Content-Encoding": "gzip"})
+    assert r.status_code == 200 and target.read_bytes() == b'{"type":"assistant"}\n'
+
+    codex = f"{base}/inbox/v1/codex/sessions/2026/10/21/rollout-2026-10-21T10-00-00-x.jsonl.zst"
+    assert httpx2.put(codex, content=b"zz", headers=auth).status_code == 200
+    for bad in (
+        f"{base}/inbox/v1/claude-code/projects/../../etc/passwd.jsonl",
+        f"{base}/inbox/v1/claude-code/other/x.jsonl",
+        f"{base}/inbox/v1/cursor/sessions/x.json",
+        f"{base}/inbox/v1/opencode/sessions/x.txt",
+    ):
+        assert httpx2.put(bad, content=b"x", headers=auth).status_code in (400, 404), bad
+    assert httpx2.put(url, content=b"x" * 20_000, headers=auth).status_code == 413
+    bomb = gzip.compress(b"0" * 50_000)
+    assert (
+        httpx2.put(url, content=bomb, headers={**auth, "Content-Encoding": "gzip"}).status_code
+        == 413
+    )
+    assert httpx2.put(url, content=b"x", headers=agent).status_code == 403
 
 
 def test_rejects_missing_or_wrong_token(server_url: str) -> None:
@@ -143,3 +200,26 @@ def test_later_finds_the_decision_that_replaced_an_earlier_one(tmp_path) -> None
         [],
         "project_timeline",
     )
+
+
+def test_device_approve_adds_client_and_disabled_connectors(tmp_path) -> None:
+    from jezero.cli import main as cli_main
+    from jezero.config import load_config
+
+    cfg = tmp_path / "jezero.toml"
+    cfg.write_text('[storage]\npath = "lib.db"\n')
+    digest = hashlib.sha256(b"k").hexdigest()
+    assert cli_main(["-c", str(cfg), "device", "approve", "my-laptop", f"sha256:{digest}"]) == 0
+    config = load_config(cfg)
+    (client,) = config.clients
+    assert (client.name, client.upload, client.token_sha256) == ("my-laptop", True, digest)
+    names = {c.name: c for c in config.connectors}
+    assert set(names) == {
+        "agent-claude-code-my-laptop",
+        "agent-codex-my-laptop",
+        "agent-opencode-my-laptop",
+    }
+    assert not any(c.enabled for c in names.values())
+    assert (tmp_path / "data" / "inbox" / "my-laptop" / "codex" / "sessions").is_dir()
+    assert cli_main(["-c", str(cfg), "device", "approve", "my-laptop", digest]) == 1
+    assert cli_main(["-c", str(cfg), "device", "approve", "x", "nothex"]) == 2

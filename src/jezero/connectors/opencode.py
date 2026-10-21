@@ -36,6 +36,10 @@ class OpenCodeConnector:
         self.name = name
         default_db = "~/.local/share/opencode/opencode.db"
         self.db_path = Path(os.path.expanduser(str(options.get("db_path", default_db))))
+        export_dir = options.get("export_dir")
+        self.export_dir = Path(os.path.expanduser(str(export_dir))) if export_dir else None
+        """Session exports (`{"session": ..., "messages": [{"info", "parts"}]}`) written by
+        the Jezero OpenCode plugin on another computer. When set, the database is not read."""
         self.settle_seconds = float(options.get("settle_minutes", 30)) * 60
         self.include_tool_calls = bool(options.get("include_tool_calls", True))
         self.max_tool_args = int(options.get("max_tool_args_chars", 200))
@@ -63,6 +67,8 @@ class OpenCodeConnector:
         now: float | None = None,
     ) -> Batch:
         now = time.time() if now is None else now
+        if self.export_dir is not None:
+            return self._collect_exports(state, limit=limit, sample=sample, now=now)
         settled_before_ms = (now - self.settle_seconds) * 1000
         cursor = float(state.cursor) if state.cursor and sample is None else 0.0
         db = self._connect()
@@ -95,26 +101,99 @@ class OpenCodeConnector:
         next_cursor = repr(max(processed)) if sample is None and processed else None
         return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
 
+    def _collect_exports(
+        self, state: ConnectorState, *, limit: int | None, sample: int | None, now: float
+    ) -> Batch:
+        assert self.export_dir is not None
+        if not self.export_dir.is_dir():
+            return Batch(docs=[], next_cursor=None, deferred=0)
+        settled_before = now - self.settle_seconds
+        cursor = float(state.cursor) if state.cursor and sample is None else 0.0
+        candidates = []
+        for path in self.export_dir.glob("*.json"):
+            try:
+                mtime = path.stat().st_mtime
+            except FileNotFoundError:
+                continue
+            if mtime > cursor:
+                candidates.append((mtime, path))
+        deferred = sum(1 for m, _ in candidates if m > settled_before)
+        ready = sorted(
+            (c for c in candidates if c[0] <= settled_before), reverse=sample is not None
+        )
+        docs: list[RawDoc] = []
+        processed: list[float] = []
+        taken = 0
+        for mtime, path in ready:
+            if (sample is not None and taken >= sample) or (limit is not None and taken >= limit):
+                break
+            try:
+                export = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                processed.append(mtime)
+                continue
+            session = export.get("session") or {}
+            roles: dict[str, tuple[str, dict[str, Any]]] = {}
+            parts: list[tuple[str, float, dict[str, Any]]] = []
+            for message in export.get("messages") or []:
+                info = message.get("info") or {}
+                msg_id = str(info.get("id") or "")
+                roles[msg_id] = (str(info.get("role") or "?"), info)
+                msg_time = float((info.get("time") or {}).get("created") or 0)
+                for part in message.get("parts") or []:
+                    stamp = (part.get("time") or {}).get("start") or msg_time
+                    parts.append((msg_id, float(stamp), part))
+            parts.sort(key=lambda p: p[1])
+            session_docs, counted = self._build_docs(
+                str(session.get("id") or path.stem),
+                session.get("parentID"),
+                session.get("directory"),
+                session.get("title"),
+                roles,
+                parts,
+            )
+            processed.append(mtime)
+            docs.extend(session_docs)
+            taken += 1 if (counted or sample is None) else 0
+        next_cursor = repr(max(processed)) if sample is None and processed else None
+        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
+
     def _session_docs(self, db: sqlite3.Connection, row: tuple) -> tuple[list[RawDoc], bool]:
         session_id, parent_id, directory, title, _, _ = row
-        if parent_id and not self.include_subagents:
-            return [], False
-        if any(fnmatch.fnmatch(directory or "", g) for g in self.skip_dir_globs):
-            return [], False
         roles: dict[str, tuple[str, dict[str, Any]]] = {}
         for msg_id, data in db.execute(
             "select id, data from message where session_id = ?", (session_id,)
         ):
             info = json.loads(data)
             roles[msg_id] = (str(info.get("role") or "?"), info)
+        parts = [
+            (msg_id, float(created), json.loads(data))
+            for _part_id, msg_id, created, data in db.execute(
+                "select id, message_id, time_created, data from part where session_id = ?"
+                " order by time_created, id",
+                (session_id,),
+            )
+        ]
+        return self._build_docs(session_id, parent_id, directory, title, roles, parts)
+
+    def _build_docs(
+        self,
+        session_id: str,
+        parent_id: str | None,
+        directory: str | None,
+        title: str | None,
+        roles: dict[str, tuple[str, dict[str, Any]]],
+        parts: list[tuple[str, float, dict[str, Any]]],
+    ) -> tuple[list[RawDoc], bool]:
+        """Shared by the database and the plugin exports. Times are epoch milliseconds."""
+        if parent_id and not self.include_subagents:
+            return [], False
+        if any(fnmatch.fnmatch(directory or "", g) for g in self.skip_dir_globs):
+            return [], False
         blocks: list[tuple[int, float, str]] = []
-        for _part_id, msg_id, created, data in db.execute(
-            "select id, message_id, time_created, data from part where session_id = ?"
-            " order by time_created, id",
-            (session_id,),
-        ):
+        for msg_id, created, part in parts:
             role = roles.get(msg_id, ("?", {}))[0]
-            text = self._render(role, json.loads(data), created / 1000)
+            text = self._render(role, part, created / 1000)
             if text:
                 blocks.append((len(blocks), created / 1000, text))
         if sum(len(b[2]) for b in blocks) < self.min_chars:

@@ -109,3 +109,40 @@ def test_dialogue_with_changes_only(tmp_path: Path) -> None:
     assert "assistant: Fixed the rounding error" in doc.text
     again = conn.collect(ConnectorState(name="oc", cursor=batch.next_cursor), now=NOW)
     assert again.docs == []
+
+
+def test_plugin_exports_are_read_like_the_database(tmp_path: Path) -> None:
+    import json
+    import os
+
+    export_dir = tmp_path / "exports"
+    export_dir.mkdir()
+    created = 1_900_000_000_000
+    export = {
+        "session": {"id": "ses_1", "directory": "/w/projects/uploader", "title": "Fix uploader"},
+        "messages": [
+            {
+                "info": {"id": "m1", "role": "user", "time": {"created": created}},
+                "parts": [{"id": "p1", "type": "text", "text": "Make the uploader retry " * 30}],
+            },
+            {
+                "info": {"id": "m2", "role": "assistant", "time": {"created": created + 5000}},
+                "parts": [
+                    {"id": "p2", "type": "reasoning", "text": "secret thinking"},
+                    {"id": "p3", "type": "text", "text": "Done: retries use backoff."},
+                ],
+            },
+        ],
+    }
+    path = export_dir / "ses_1.json"
+    path.write_text(json.dumps(export))
+    os.utime(path, (created / 1000, created / 1000))
+    from jezero.connectors.opencode import OpenCodeConnector
+    from jezero.store import ConnectorState
+
+    conn = OpenCodeConnector("o", {"export_dir": str(export_dir)}, max_segment_chars=60_000)
+    batch = conn.collect(ConnectorState("o"), now=created / 1000 + 7200)
+    (doc,) = batch.docs
+    assert doc.project_hint == "uploader" and doc.title_hint == "Fix uploader"
+    assert "Make the uploader retry" in doc.text and "Done: retries use backoff." in doc.text
+    assert "secret thinking" not in doc.text

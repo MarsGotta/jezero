@@ -194,3 +194,24 @@ def test_user_prompt_markers_drop_repeated_agent_instructions(tmp_path: Path) ->
     assert "long instructions" not in doc.text
     assert "## Wake Payload" in doc.text
     assert "Fix the login bug" not in doc.text
+
+
+def test_compressed_rollouts_read_like_plain_ones(tmp_path: Path) -> None:
+    import zstandard
+
+    sessions = make_tree(tmp_path)
+    opts = {"sessions_dir": str(sessions), "skip_cwd_globs": ["*/bench-*"], "min_chars": 0}
+    plain = CodexConnector("c", opts, max_segment_chars=20_000).collect(
+        ConnectorState("c"), now=NOW
+    )
+    for path in sessions.rglob("*.jsonl"):
+        stat = path.stat()
+        packed = path.with_name(path.name + ".zst")
+        packed.write_bytes(zstandard.ZstdCompressor().compress(path.read_bytes()))
+        os.utime(packed, (stat.st_atime, stat.st_mtime))
+        path.unlink()
+    packed_batch = CodexConnector("c", opts, max_segment_chars=20_000).collect(
+        ConnectorState("c"), now=NOW
+    )
+    assert [d.text for d in packed_batch.docs] == [d.text for d in plain.docs]
+    assert packed_batch.deferred == plain.deferred

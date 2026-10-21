@@ -50,5 +50,16 @@
   instructions now tell agents that decisions change and to check `later` before answering
   with a decision, plan or status. Each item summarises one session, so nothing else marks
   a decision as superseded.
+- Plugins for Claude Code, Codex and OpenCode (`clients/`), thin adapters over one shared
+  core (`clients/core/jezero_client.py`, Python 3.9+, standard library only). They add a
+  short protocol and the project's recent work at session start, related past work on the
+  first prompt, and upload each session to the server when it ends. The device key is
+  created on the device; the server only stores its SHA-256 (`jezero device approve`).
+  `scripts/build_clients.py` builds the bundle served at `/client/jezero-client.tar.gz`.
+- Inbox: `PUT /inbox/v1/<agent>/<path>` for clients with `upload = true`; files land in
+  `<inbox>/<device>/<agent>/...`, mirroring each agent's store, and the usual connectors
+  read them. Codex rollouts compressed with zstd (`.jsonl.zst`) are read; OpenCode can
+  read session exports (`export_dir`); Claude Code can skip project folders
+  (`skip_project_dirs`).
 - The MCP server unit stops within 10 s: clients keep streams open and the default 90 s
   wait made restarts slow.

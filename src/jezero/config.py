@@ -79,6 +79,8 @@ class ServerConfig(_Strict):
     allowed_hosts: list[str] = Field(default_factory=list)
     """Extra Host header values accepted (DNS-rebinding protection). Derived from public_url."""
     require_auth: bool = True
+    client_bundle: Path | None = Path("dist/jezero-client.tar.gz")
+    """Plugin bundle offered at /client/jezero-client.tar.gz (public code, no auth)."""
 
     @field_validator("path")
     @classmethod
@@ -113,6 +115,8 @@ class ClientConfig(_Strict):
     """Or: the SHA-256 hex digest of the token (`jezero new-token` prints one)."""
     sources: list[str] = Field(default_factory=lambda: ["*"])
     """Source names (glob patterns) this client may read. Default: everything."""
+    upload: bool = False
+    """May deliver raw session files to the inbox (a device running the Jezero plugins)."""
 
     @field_validator("name")
     @classmethod
@@ -133,6 +137,14 @@ class ClientConfig(_Strict):
         if (self.token_env is None) == (self.token_sha256 is None):
             raise ValueError(f"client {self.name!r}: set exactly one of token_env or token_sha256")
         return self
+
+
+class InboxConfig(_Strict):
+    """Where devices deliver raw session files (see `jezero.inbox`)."""
+
+    dir: Path = Path("data/inbox")
+    max_mb: float = Field(64.0, gt=0)
+    """Largest accepted file, after decompression."""
 
 
 class ConnectorConfig(_Strict):
@@ -200,6 +212,7 @@ class Config(_Strict):
     connectors: list[ConnectorConfig] = Field(default_factory=list)
     redaction: RedactionConfig = Field(default_factory=RedactionConfig)
     watchdog: WatchdogConfig = Field(default_factory=WatchdogConfig)
+    inbox: InboxConfig = Field(default_factory=InboxConfig)
 
     source_file: Path | None = Field(default=None, exclude=True)
 
@@ -224,6 +237,13 @@ class Config(_Strict):
     @property
     def db_path(self) -> Path:
         path = self.storage.path.expanduser()
+        if not path.is_absolute() and self.source_file is not None:
+            path = self.source_file.parent / path
+        return path
+
+    @property
+    def inbox_dir(self) -> Path:
+        path = self.inbox.dir.expanduser()
         if not path.is_absolute() and self.source_file is not None:
             path = self.source_file.parent / path
         return path

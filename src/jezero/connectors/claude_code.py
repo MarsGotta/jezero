@@ -13,6 +13,7 @@ text is kept in the library once ingested.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
@@ -60,6 +61,8 @@ class ClaudeCodeConnector:
         self.skip_entrypoints = set(options.get("skip_entrypoints", []))
         self.min_chars = int(options.get("min_chars", 400))
         self.project_aliases = dict(options.get("project_aliases", {}))
+        self.skip_project_dirs = list(options.get("skip_project_dirs", []))
+        """Globs on the project folder name (Claude Code's slug of the working directory)."""
         self.max_segment_chars = max_segment_chars
         self.default_project = default_project
 
@@ -71,6 +74,15 @@ class ClaudeCodeConnector:
         files = sorted(self.root.rglob("*.jsonl"))
         if not self.include_subagents:
             files = [f for f in files if "subagents" not in f.relative_to(self.root).parts]
+        if self.skip_project_dirs:
+            files = [
+                f
+                for f in files
+                if not any(
+                    fnmatch.fnmatch(f.relative_to(self.root).parts[0], g)
+                    for g in self.skip_project_dirs
+                )
+            ]
         return files
 
     def collect(

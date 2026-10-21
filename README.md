@@ -82,6 +82,14 @@ claude mcp add --transport http jezero http://127.0.0.1:8765/mcp \
 All tools are annotated read-only. Each client sees only the sources its config entry
 allows (glob patterns), so a coding agent does not have to see your mail.
 
+## Other computers: plugins
+
+Sessions on other computers reach Jezero through plugins for Claude Code, Codex and
+OpenCode, which also make agents use Jezero by habit (a short protocol and recent project
+work at session start, related past work on the first prompt). No SSH needed: each
+computer creates its own key, the server approves its fingerprint, and sessions are
+uploaded when they end. See [clients/README.md](clients/README.md).
+
 ## Configuration
 
 Everything lives in one TOML file: storage, search tuning, summarizer endpoint, server

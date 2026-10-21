@@ -300,7 +300,79 @@ def build_server(config: Config, store: Store | None = None) -> tuple[MCPServer,
         transport_security=_transport_security(config),
         host=server_cfg.host,
     )
+    _add_inbox_routes(app, config)
     return mcp, app
+
+
+def _add_inbox_routes(app: Starlette, config: Config) -> None:
+    """Device uploads (`PUT /inbox/v1/<agent>/<path>`) and a ping to check a device key.
+
+    Separate from MCP on purpose: MCP stays read-only, and only clients with
+    `upload = true` may write, only into their own device folder.
+    """
+    import asyncio
+
+    from starlette.requests import Request
+    from starlette.responses import FileResponse, JSONResponse, Response
+    from starlette.routing import Route
+
+    from . import inbox
+
+    verifier = StaticTokenVerifier(config.clients)
+    clients = {c.name: c for c in config.clients}
+    max_bytes = int(config.inbox.max_mb * 1024 * 1024)
+
+    async def device(request: Request) -> str:
+        header = request.headers.get("authorization", "")
+        scheme, _, token = header.partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            raise inbox.InboxError("missing bearer token", status=401)
+        access = await verifier.verify_token(token.strip())
+        if access is None:
+            raise inbox.InboxError("unknown token", status=401)
+        if not clients[access.client_id].upload:
+            raise inbox.InboxError("this key may not upload", status=403)
+        return access.client_id
+
+    async def ping(request: Request) -> JSONResponse:
+        try:
+            name = await device(request)
+        except inbox.InboxError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=exc.status)
+        return JSONResponse({"ok": True, "device": name, "version": __version__})
+
+    async def upload(request: Request) -> JSONResponse:
+        try:
+            name = await device(request)
+            agent = request.path_params["agent"]
+            relpath = request.path_params["relpath"]
+            inbox.target_path(config.inbox_dir, name, agent, relpath)  # validate first
+            declared = int(request.headers.get("content-length") or 0)
+            if declared > max_bytes:
+                raise inbox.InboxError("file too large", status=413)
+            raw = await request.body()
+            data = inbox.read_body(
+                raw, encoding=request.headers.get("content-encoding"), max_bytes=max_bytes
+            )
+            stored = await asyncio.to_thread(
+                inbox.store, config.inbox_dir, name, agent, relpath, data
+            )
+        except inbox.InboxError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=exc.status)
+        log.info("inbox: %s/%s/%s (%d bytes)", name, agent, relpath, stored.bytes)
+        return JSONResponse({"ok": True, "device": name, "bytes": stored.bytes})
+
+    async def bundle(_: Request) -> Response:
+        path = config.server.client_bundle
+        if path is not None and not path.is_absolute() and config.source_file is not None:
+            path = config.source_file.parent / path
+        if path is None or not path.is_file():
+            return JSONResponse({"ok": False, "error": "no client bundle built"}, status_code=404)
+        return FileResponse(path, media_type="application/gzip", filename=path.name)
+
+    app.router.routes.append(Route("/client/jezero-client.tar.gz", bundle, methods=["GET"]))
+    app.router.routes.append(Route("/inbox/v1/ping", ping, methods=["GET"]))
+    app.router.routes.append(Route("/inbox/v1/{agent}/{relpath:path}", upload, methods=["PUT"]))
 
 
 def _transport_security(config: Config) -> TransportSecuritySettings | None:

@@ -235,6 +235,58 @@ def cmd_resummarize(config: Config, args: argparse.Namespace) -> int:
     return 1 if report.failed else 0
 
 
+def cmd_device_approve(config: Config, args: argparse.Namespace) -> int:
+    """Register a device key (its SHA-256 digest) and its inbox connectors (disabled)."""
+    import re
+
+    name, digest = args.name, args.digest.removeprefix("sha256:").lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", name):
+        print("error: device name must be lowercase letters, digits, - or _", file=sys.stderr)
+        return 2
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        print("error: digest must be the 64-char SHA-256 printed by the client", file=sys.stderr)
+        return 2
+    if any(c.name == name for c in config.clients):
+        print(f"error: a client named {name!r} already exists", file=sys.stderr)
+        return 1
+    if config.source_file is None:
+        print("error: no config file to write to", file=sys.stderr)
+        return 1
+    inbox = config.inbox_dir / name
+    sources = ", ".join(json.dumps(s) for s in args.sources)
+    block = [
+        "",
+        "[[clients]]",
+        f"# Device {name}: reads Jezero and uploads its sessions to the inbox.",
+        f'name = "{name}"',
+        f'token_sha256 = "{digest}"',
+        f"sources = [{sources}]",
+        "upload = true",
+    ]
+    stores = {
+        "claude-code": ("claude_code", "projects_dir", inbox / "claude-code" / "projects"),
+        "codex": ("codex", "sessions_dir", inbox / "codex" / "sessions"),
+        "opencode": ("opencode", "export_dir", inbox / "opencode" / "sessions"),
+    }
+    for agent, (ctype, option, folder) in stores.items():
+        folder.mkdir(parents=True, exist_ok=True)
+        block += [
+            "",
+            "[[connectors]]",
+            f"# Sessions uploaded by {name}. Disabled until the pilot passes.",
+            f'name = "agent-{agent}-{name}"',
+            f'type = "{ctype}"',
+            "enabled = false",
+            "interval_minutes = 15",
+            "[connectors.options]",
+            f'{option} = "{folder}"',
+        ]
+    with config.source_file.open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(block) + "\n")
+    print(f"approved {name}; restart the MCP server so it accepts the new key")
+    return 0
+
+
 def cmd_health(config: Config, _: argparse.Namespace) -> int:
     from .watchdog import alert, evaluate, heartbeat
 
@@ -306,6 +358,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--due", action="store_true", help="only connectors whose interval_minutes has elapsed"
     )
     p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("device", help="devices that upload sessions (Jezero plugins)")
+    dsub = p.add_subparsers(dest="device_command", required=True)
+    d = dsub.add_parser("approve", help="accept a device key printed by `jezero_client init`")
+    d.add_argument("name")
+    d.add_argument("digest", help="sha256 of the device key, as printed by the client")
+    d.add_argument("--sources", nargs="+", default=["agent-*"], help="what it may read")
+    d.set_defaults(fn=cmd_device_approve)
 
     p = sub.add_parser("resummarize", help="summarise stored items again from their original")
     p.add_argument("--ids", help="comma-separated item ids")
