@@ -1,13 +1,14 @@
 """The inbox: devices deliver raw session files here.
 
-A device that runs the Jezero plugins (Claude Code, Codex, OpenCode, Hermes) uploads each
-session transcript when the session ends. The server only stores the file; the usual
+A device that runs the Jezero plugins (Claude Code, Codex, OpenCode, Hermes, Antigravity)
+uploads each session transcript when the session ends. The server only stores the file; the usual
 connectors read the inbox later, exactly as they read the local stores, so summarising,
 redaction and dedup stay in one place.
 
 Layout: `<inbox>/<device>/<agent>/<relative path>`, where the relative path mirrors the
 agent's own store (`projects/<slug>/<id>.jsonl` for Claude Code, `sessions/YYYY/MM/DD/
-rollout-*.jsonl[.zst]` for Codex, `sessions/<id>.json` for OpenCode and Hermes exports).
+rollout-*.jsonl[.zst]` for Codex, `sessions/<id>.json` for OpenCode and Hermes exports,
+`brain/<id>/transcript.jsonl` for Antigravity).
 That keeps the existing connectors working unchanged on a device's folder.
 
 The file's mtime is set to the upload time, not the source time: connectors keep a cursor
@@ -33,6 +34,7 @@ AGENTS: dict[str, re.Pattern[str]] = {
     ),
     "opencode": re.compile(r"sessions/[A-Za-z0-9._-]{1,200}\.json"),
     "hermes": re.compile(r"sessions/[A-Za-z0-9._-]{1,200}\.json"),
+    "antigravity": re.compile(r"brain/[A-Za-z0-9-]{8,64}/transcript\.jsonl"),
 }
 
 

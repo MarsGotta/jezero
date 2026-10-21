@@ -132,10 +132,10 @@ box(
     74,
     "dev",
     "Laptops and desktops",
-    ("Claude Code, Codex, OpenCode, Hermes", "with the Jezero plugin"),
+    ("Claude Code, Codex, OpenCode, Hermes,", "Antigravity · with the Jezero plugin"),
 )
 box(34, 594, 287, 50, "dev", "Email", ("planned · stored as external",), dashed=True)
-box(34, 654, 287, 50, "dev", "Antigravity, Cursor", ("planned · a folder watcher",), dashed=True)
+box(34, 654, 287, 50, "dev", "Cursor", ("planned · a folder watcher",), dashed=True)
 
 group(392, 68, 610, 680, "srv", "One process · behind your VPN or a reverse proxy")
 box(

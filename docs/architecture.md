@@ -20,7 +20,7 @@ flowchart LR
     A6[Paperclip tasks · API]
   end
   subgraph away["Other computers"]
-    D1["Claude Code · Codex · OpenCode · Hermes<br/>with the Jezero plugin"]
+    D1["Claude Code · Codex · OpenCode · Hermes · Antigravity<br/>with the Jezero plugin"]
   end
   subgraph server["Jezero server"]
     IN["Inbox · /inbox/v1<br/>upload-only, one key per device"]
@@ -52,7 +52,7 @@ flowchart LR
 | Store | `src/jezero/store.py` | One SQLite file, FTS5 trigram index, BM25 with recency. |
 | MCP server | `src/jezero/server.py` | Read-only tools, a bearer key per client, per-client source filters. Also hosts the device inbox and the plugin bundle. |
 | Device client | `clients/core/jezero_client.py` | Standard library only. Hooks, upload queue with retries, device key, MCP setup. |
-| Plugins | `clients/claude-code`, `clients/codex`, `clients/opencode`, `clients/hermes` | Thin adapters over the client, plus one skill shared by all. |
+| Plugins | `clients/claude-code`, `clients/codex`, `clients/opencode`, `clients/hermes`, `clients/antigravity` | Thin adapters over the client, plus one skill shared by all. |
 
 ## One session, step by step
 

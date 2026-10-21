@@ -42,7 +42,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.3.4"
+VERSION = "0.4.0"
 AGENT_HOME_VARS = ("CLAUDE_CONFIG_DIR", "CODEX_HOME")
 
 
@@ -60,16 +60,32 @@ def client_home() -> Path:
     return Path("~/.jezero").expanduser()
 
 
-HOME = client_home()
-CONFIG = HOME / "client.json"
-TOKEN_FILE = HOME / "token"
-SPOOL = HOME / "spool"
-STATE = HOME / "state.json"
-LOG = HOME / "client.log"
-CA_FILE = HOME / "ca.pem"
-AGENTS = ("claude-code", "codex", "opencode", "hermes")
-SETUP_AGENTS = (*AGENTS, "antigravity")
-"""`setup` also knows Antigravity (MCP server and skill; it has no session hooks yet)."""
+def use_home(home: Path) -> None:
+    """Point every client file at `home` (the key, queue, state and log live together)."""
+    global HOME, CONFIG, TOKEN_FILE, SPOOL, STATE, LOG, CA_FILE
+    HOME = home
+    CONFIG = HOME / "client.json"
+    TOKEN_FILE = HOME / "token"
+    SPOOL = HOME / "spool"
+    STATE = HOME / "state.json"
+    LOG = HOME / "client.log"
+    CA_FILE = HOME / "ca.pem"
+
+
+def use_agent_home(agent: str | None) -> None:
+    """Antigravity keeps its own key in `~/.gemini/config/jezero` when one is there: agents
+    run in a sandbox may see Antigravity's folder but not `~/.jezero`."""
+    if agent != "antigravity" or os.environ.get("JEZERO_CLIENT_HOME"):
+        return
+    home = Path.home() / ".gemini" / "config" / "jezero"
+    if (home / "client.json").is_file():
+        use_home(home)
+
+
+HOME = CONFIG = TOKEN_FILE = SPOOL = STATE = LOG = CA_FILE = Path()
+use_home(client_home())
+AGENTS = ("claude-code", "codex", "opencode", "hermes", "antigravity")
+SETUP_AGENTS = AGENTS
 
 HOOK_TIMEOUT = float(os.environ.get("JEZERO_HOOK_TIMEOUT", "2.5"))
 STOP_THROTTLE_SECONDS = 15 * 60
@@ -152,6 +168,7 @@ def _http(
     body: bytes | None = None,
     headers: dict[str, str] | None = None,
     timeout: float = 10.0,
+    response_headers: dict[str, str] | None = None,
 ) -> tuple[int, bytes]:
     request = urllib.request.Request(url, data=body, method=method)
     request.add_header("Authorization", f"Bearer {token}")
@@ -163,6 +180,8 @@ def _http(
             with urllib.request.urlopen(
                 request, timeout=timeout, context=_ssl_context()
             ) as response:
+                if response_headers is not None:
+                    response_headers.update(response.headers.items())
                 return response.status, response.read()
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read()
@@ -370,6 +389,12 @@ def relpath_for(agent: str, path: Path) -> str | None:
         return None
     if agent in ("opencode", "hermes"):
         return f"sessions/{_safe(path.stem)}.json" if path.suffix == ".json" else None
+    if agent == "antigravity":
+        # <data dir>/brain/<conversation>/.system_generated/logs/transcript.jsonl
+        if path.name != "transcript.jsonl" or "brain" not in parts:
+            return None
+        rest = parts[parts.index("brain") + 1 :]
+        return f"brain/{_safe(rest[0])}/transcript.jsonl" if len(rest) > 1 else None
     return None
 
 
@@ -658,6 +683,121 @@ def hook(event: str, agent: str, payload: dict[str, Any]) -> str:
     return ""
 
 
+_REQUEST = re.compile(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", re.S)
+
+
+def antigravity_prompt(transcript: str | None) -> str:
+    """The latest request typed in an Antigravity conversation (its transcript.jsonl)."""
+    if not transcript:
+        return ""
+    last = ""
+    try:
+        with Path(transcript).open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if '"USER_INPUT"' not in line:
+                    continue
+                try:
+                    step = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(step, dict) and step.get("type") == "USER_INPUT":
+                    last = str(step.get("content") or "")
+    except OSError:
+        return ""
+    found = _REQUEST.findall(last)
+    return "\n\n".join(found).strip() if found else last.strip()
+
+
+def antigravity_hook(event: str, raw: dict[str, Any]) -> dict[str, Any]:
+    """Antigravity hooks: JSON in (camelCase), JSON out. SessionStart and the first model
+    call of a request get context as a system message; Stop queues the transcript."""
+    workspaces = raw.get("workspacePaths") or []
+    payload = {
+        "session_id": raw.get("conversationId") or os.environ.get("ANTIGRAVITY_CONVERSATION_ID"),
+        "cwd": workspaces[0] if workspaces and isinstance(workspaces[0], str) else None,
+        "transcript_path": raw.get("transcriptPath"),
+    }
+    if event == "user-prompt":
+        if raw.get("invocationNum") not in (0, None):
+            return {}
+        payload["prompt"] = antigravity_prompt(payload["transcript_path"])
+    if event == "stop" and raw.get("fullyIdle") is False:
+        return {}  # background work still running: wait for the final stop
+    text = hook(event, "antigravity", payload)
+    if text and event in ("session-start", "user-prompt"):
+        return {"injectSteps": [{"systemMessage": {"systemMessage": text}}]}
+    return {}
+
+
+# ------------------------------------------------------------------------------ mcp
+
+
+def _rpc_error(request_id: Any, message: str) -> str:
+    error = {"code": -32000, "message": message}
+    return json.dumps({"jsonrpc": "2.0", "id": request_id, "error": error})
+
+
+def mcp_proxy(stdin: Any = None, stdout: Any = None) -> int:
+    """A local stdio MCP server that forwards every message to the Jezero server with this
+    computer's key, so an agent's config never holds the key (Antigravity plugin)."""
+    stdin = stdin or sys.stdin
+    stdout = stdout or sys.stdout
+    session: str | None = None
+    while True:
+        line = stdin.readline()
+        if not line:
+            return 0
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        batch = message if isinstance(message, list) else [message]
+        ids = [m["id"] for m in batch if isinstance(m, dict) and "id" in m and "method" in m]
+        cfg = load_config()
+        replies: list[str] = []
+        if cfg is None:
+            hint = "Jezero is not connected on this computer: run `jezero_client.py init`."
+            replies = [_rpc_error(i, hint) for i in ids]
+        else:
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            }
+            if session:
+                headers["Mcp-Session-Id"] = session
+            received: dict[str, str] = {}
+            try:
+                status, raw = _http(
+                    "POST",
+                    cfg["url"].rstrip("/") + "/mcp",
+                    cfg["token"],
+                    body=line.encode("utf-8"),
+                    headers=headers,
+                    timeout=60,
+                    response_headers=received,
+                )
+            except (OSError, urllib.error.URLError) as exc:
+                status, raw = 0, str(exc).encode()
+            session = next(
+                (v for k, v in received.items() if k.lower() == "mcp-session-id"), session
+            )
+            text = raw.decode("utf-8", "replace")
+            if status >= 400 or status == 0:
+                reason = f"Jezero is not reachable right now (HTTP {status}): {text[:200]}"
+                replies = [_rpc_error(i, reason) for i in ids]
+            elif text.lstrip().startswith(("event:", "data:")):
+                replies = [d[5:].strip() for d in text.splitlines() if d.startswith("data:")]
+            elif text.strip():
+                replies = [text.strip()]
+        for reply in replies:
+            if reply:
+                stdout.write(reply + "\n")
+        stdout.flush()
+
+
 # -------------------------------------------------------------------------- install
 
 
@@ -799,62 +939,6 @@ def _setup_opencode(plugin_source: Path | None) -> str:
     return f"opencode: plugin (with the MCP server and the skill) installed in {target}"
 
 
-def _skill_source() -> Path | None:
-    """The shared SKILL.md shipped near this file: in a plugin, the bundle or the repo."""
-    here = Path(__file__).resolve().parent
-    for candidate in (
-        here.parent / "skills",  # plugins/<agent>/core/jezero_client.py
-        here / "skills",
-        here / "claude-code" / "skills",  # root of the server's client bundle
-        here.parent / "skill",  # clients/core in the repository
-    ):
-        skill = (
-            candidate / "jezero" / "SKILL.md"
-            if candidate.name == "skills"
-            else candidate / "SKILL.md"
-        )
-        if skill.is_file():
-            return skill
-    return None
-
-
-def _setup_antigravity(cfg: dict[str, Any]) -> str:
-    """Antigravity (app, IDE and CLI) reads MCP servers and skills from ~/.gemini/config."""
-    gemini = Path.home() / ".gemini"
-    if not gemini.exists() and not shutil.which("agy"):
-        return "antigravity: not found, skipped"
-    base = gemini / "config"
-    path = base / "mcp_config.json"
-    try:
-        data = json.loads(path.read_text(encoding="utf-8") or "{}") if path.exists() else {}
-    except ValueError:
-        return f"antigravity: {path} is not valid JSON, left untouched"
-    servers = data.setdefault("mcpServers", {}) if isinstance(data, dict) else None
-    if not isinstance(servers, dict):
-        return f"antigravity: unexpected content in {path}, left untouched"
-    if "jezero" in servers:
-        status = "MCP server jezero already registered"
-    else:
-        servers["jezero"] = {
-            "serverUrl": cfg["url"].rstrip("/") + "/mcp",
-            "headers": {"Authorization": f"Bearer {cfg['token']}"},
-        }
-        base.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        with contextlib.suppress(OSError):
-            os.chmod(tmp, 0o600)  # it holds the key
-        os.replace(tmp, path)
-        status = "MCP registered"
-    skill = _skill_source()
-    if skill:
-        target = base / "skills" / "jezero" / "SKILL.md"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(str(skill), str(target))
-        status += " and skill installed"
-    return f"antigravity: {status} ({base})"
-
-
 def setup(agents: list[str], opencode_plugin: str | None) -> int:
     cfg = load_config()
     if not cfg:
@@ -869,7 +953,11 @@ def setup(agents: list[str], opencode_plugin: str | None) -> int:
             source = Path(opencode_plugin) if opencode_plugin else None
             print(_setup_opencode(source))
         elif agent == "antigravity":
-            print(_setup_antigravity(cfg))
+            print(
+                "antigravity: install the plugin with `agy plugin install "
+                "https://github.com/MarsGotta/jezero/tree/main/plugins/antigravity` "
+                "(it brings the MCP server, the skill and the hooks)"
+            )
         elif agent == "hermes":
             print(
                 "hermes: install the plugin with `hermes plugins install "
@@ -906,7 +994,7 @@ def _backfill_hermes(since: float, hermes_home: str | None) -> int:
 
 
 def backfill(agents: list[str], days: float, hermes_home: str | None = None) -> int:
-    """Queue sessions already on disk (Claude Code, Codex and Hermes stores)."""
+    """Queue sessions already on disk (Claude Code, Codex, Hermes and Antigravity stores)."""
     if not uploads_enabled(load_config()):
         print("read-only computer (init --no-upload): nothing to upload")
         return 0
@@ -925,6 +1013,20 @@ def backfill(agents: list[str], days: float, hermes_home: str | None = None) -> 
     for agent in agents:
         if agent == "hermes":
             queued += _backfill_hermes(since, hermes_home)
+            continue
+        if agent == "antigravity":
+            gemini = Path.home() / ".gemini"
+            for app in ("antigravity-cli", "antigravity", "antigravity-ide"):
+                pattern = "*/.system_generated/logs/transcript.jsonl"
+                for path in sorted((gemini / app / "brain").glob(pattern)):
+                    conversation = path.parts[-4]
+                    try:
+                        if path.stat().st_mtime >= since and enqueue(
+                            agent, conversation, str(path), None
+                        ):
+                            queued += 1
+                    except OSError:
+                        continue
             continue
         if agent not in roots:
             print(f"{agent}: backfill not supported (sessions arrive through the plugin)")
@@ -964,6 +1066,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("setup", help="register the Jezero MCP server in the agents")
     p.add_argument("--agent", action="append", choices=SETUP_AGENTS)
     p.add_argument("--opencode-plugin", help="path to jezero.ts to install for OpenCode")
+    p = sub.add_parser("mcp", help="stdio MCP server that forwards to Jezero with this key")
+    p.add_argument("--agent", choices=AGENTS)
     p = sub.add_parser("hook", help="run a hook (reads the agent's JSON on stdin)")
     p.add_argument("event", choices=["session-start", "user-prompt", "stop", "session-end"])
     p.add_argument("--agent", required=True, choices=AGENTS)
@@ -974,6 +1078,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--hermes-home", help="Hermes profile folder (default: $HERMES_HOME)")
     sub.add_parser("protocol", help="print the instructions given to agents")
     args = parser.parse_args(argv)
+    agent = getattr(args, "agent", None)
+    use_agent_home(agent if isinstance(agent, str) else None)
 
     if args.command == "init":
         return init(args.url, args.device, args.force, upload=not args.no_upload)
@@ -981,6 +1087,16 @@ def main(argv: list[str] | None = None) -> int:
         return status()
     if args.command == "setup":
         return setup(args.agent or list(SETUP_AGENTS), args.opencode_plugin)
+    if args.command == "mcp":
+        return mcp_proxy()
+    if args.command == "hook" and args.agent == "antigravity":
+        try:
+            out = antigravity_hook(args.event, _read_payload())
+        except Exception as exc:  # noqa: BLE001 - a hook must never break the agent
+            log(f"hook {args.event} antigravity: {exc!r}")
+            out = {}
+        sys.stdout.write(json.dumps(out) + "\n")
+        return 0
     if args.command == "hook":
         text = hook(args.event, args.agent, _read_payload())
         if text:

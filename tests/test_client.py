@@ -234,28 +234,3 @@ def test_client_home_inside_a_sandboxed_agent(tmp_path: Path, monkeypatch: pytes
     monkeypatch.delenv("CLAUDE_CONFIG_DIR")
     monkeypatch.setenv("CODEX_HOME", str(agent))
     assert core.client_home() == agent / "jezero"
-
-
-def test_setup_antigravity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    core = load_core(tmp_path / "jz", monkeypatch)
-    configure(core, "https://lib.example")
-    monkeypatch.setenv("HOME", str(tmp_path / "user"))
-    config = tmp_path / "user" / ".gemini" / "config"
-    config.mkdir(parents=True)
-    other = {"serverUrl": "https://other.example/mcp"}
-    (config / "mcp_config.json").write_text(json.dumps({"mcpServers": {"other": other}}))
-
-    assert core.setup(["antigravity"], None) == 0
-    assert "MCP registered and skill installed" in capsys.readouterr().out
-    servers = json.loads((config / "mcp_config.json").read_text())["mcpServers"]
-    assert servers["other"] == other  # the user's own servers stay
-    assert servers["jezero"]["serverUrl"] == "https://lib.example/mcp"
-    assert servers["jezero"]["headers"]["Authorization"] == "Bearer " + DEVICE_TOKEN
-    assert "name: jezero" in (config / "skills" / "jezero" / "SKILL.md").read_text()
-
-    core.setup(["antigravity"], None)
-    assert "already registered" in capsys.readouterr().out
-    (config / "mcp_config.json").write_text("{ not json")
-    core.setup(["antigravity"], None)
-    assert "left untouched" in capsys.readouterr().out
-    assert (config / "mcp_config.json").read_text() == "{ not json"

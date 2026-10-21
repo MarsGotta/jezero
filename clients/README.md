@@ -10,8 +10,9 @@ the same library.
 | Codex | the same hooks and skill (Codex asks you to trust the hooks once, in `/hooks`) |
 | OpenCode | the MCP server, the protocol and related past work in the system prompt, the skill, upload when a session goes idle |
 | Hermes Agent | `jezero_*` tools, related past work on the first turn, the `jezero:jezero` skill, upload as turns end |
+| Antigravity | the MCP server (a local bridge, so no key in its config), the same hooks as Claude Code, the skill, upload when a conversation stops |
 
-All four share one core, `jezero_client.py` (Python 3.9+, standard library only).
+All five share one core, `jezero_client.py` (Python 3.9+, standard library only).
 
 ## What the hooks do
 
@@ -75,8 +76,13 @@ errors only go to `~/.jezero/client.log`.
    - Hermes Agent: `hermes plugins install MarsGotta/jezero/plugins/hermes --enable`, then
      restart the gateway. The tools appear once step 2 is done; the plugin carries its
      own copy of the core. Older sessions: `jezero_client.py backfill --agent hermes`.
-   - Antigravity (app, IDE and CLI): no plugin yet; `setup --agent antigravity` adds the
-     MCP server and the skill. Step by step in [docs/antigravity.md](../docs/antigravity.md).
+   - Antigravity: `agy plugin install
+     https://github.com/MarsGotta/jezero/tree/main/plugins/antigravity` (the full path:
+     the bare repository URL installs the Claude Code plugin). Read-only tools ask for
+     permission once; for headless runs add `"mcp(jezero_jezero/*)"` to
+     `permissions.allow` in `~/.gemini/antigravity-cli/settings.json`. A sandbox that
+     sees `~/.gemini` but not your home can keep its key in `~/.gemini/config/jezero`.
+     Older conversations: `jezero_client.py backfill --agent antigravity`.
 
 5. Optional: send the sessions already on this computer.
 

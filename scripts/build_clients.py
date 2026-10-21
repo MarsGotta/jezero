@@ -7,6 +7,7 @@
     clients/codex/                  Codex plugin manifest and hooks
     clients/opencode/               OpenCode plugin (jezero.ts) and its package.json
     clients/hermes/                 Hermes Agent plugin (plugin.yaml, __init__.py)
+    clients/antigravity/            Antigravity plugin (plugin.json, hooks.json, mcp_config.json)
 
 Output:
 
@@ -115,7 +116,7 @@ def marketplaces(root: Path, prefix: str) -> None:
 
 
 def plugins(base: Path) -> None:
-    for agent in ("claude-code", "codex", "opencode", "hermes"):
+    for agent in ("claude-code", "codex", "opencode", "hermes", "antigravity"):
         plugin(agent, base / agent)
 
 

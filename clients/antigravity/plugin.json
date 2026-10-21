@@ -1,0 +1,5 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "jezero",
+  "description": "Jezero: shared read-only memory of past agent work. Search tools, recent work of the project at the start of a conversation, related past work on the first request, and upload of this computer's conversations to your Jezero server."
+}

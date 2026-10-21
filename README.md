@@ -124,8 +124,8 @@ allows (glob patterns), so a coding agent does not have to see your mail.
 
 ## Other computers: plugins
 
-Sessions on other computers reach Jezero through plugins for Claude Code, Codex, OpenCode
-and Hermes Agent, which also make agents use Jezero by habit (a short protocol and recent project
+Sessions on other computers reach Jezero through plugins for Claude Code, Codex, OpenCode,
+Hermes Agent and Antigravity, which also make agents use Jezero by habit (a short protocol and recent project
 work at session start, related past work on the first prompt). No SSH needed: each
 computer creates its own key, the server approves its fingerprint, and sessions are
 uploaded when they end. See [clients/README.md](clients/README.md).
@@ -136,10 +136,10 @@ The plugins install straight from this repository:
 claude plugin marketplace add MarsGotta/jezero && claude plugin install jezero@jezero
 codex plugin marketplace add MarsGotta/jezero    # then install Jezero from /plugins
 hermes plugins install MarsGotta/jezero/plugins/hermes --enable
+agy plugin install https://github.com/MarsGotta/jezero/tree/main/plugins/antigravity
 ```
 
-OpenCode loads the folder `plugins/opencode` (or `setup` installs it for you). Antigravity gets the
-MCP server and the skill with one command: see [docs/antigravity.md](docs/antigravity.md).
+OpenCode loads the folder `plugins/opencode` (or `setup` installs it for you).
 
 They stay quiet until the computer is connected to your server with
 `jezero_client.py init` (step 2 in the clients guide).
@@ -198,7 +198,7 @@ connectors that went quiet. Ready-made systemd user units and a cron line are in
 ## Roadmap
 
 1. Gmail connector (read-only scope, per thread, newsletters skipped).
-2. A folder watcher for agents without hooks (Antigravity, Cursor) on other computers.
+2. A folder watcher for agents without hooks (Cursor) on other computers.
 3. A retrieval benchmark command (questions with expected hits, top-k accuracy).
 4. Optional vector search with sqlite-vec.
 

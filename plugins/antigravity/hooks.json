@@ -1,0 +1,13 @@
+{
+  "jezero": {
+    "SessionStart": [
+      {"type": "command", "command": "python3 ./core/jezero_client.py hook session-start --agent antigravity", "timeout": 15}
+    ],
+    "PreInvocation": [
+      {"type": "command", "command": "python3 ./core/jezero_client.py hook user-prompt --agent antigravity", "timeout": 15}
+    ],
+    "Stop": [
+      {"type": "command", "command": "python3 ./core/jezero_client.py hook stop --agent antigravity", "timeout": 10}
+    ]
+  }
+}
