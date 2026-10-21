@@ -1,6 +1,6 @@
 """Draw docs/architecture.svg, the diagram at the top of the README.
 
-    python3 docs/make_architecture.py
+    python3 scripts/make_architecture.py
 
 Plain SVG with a white background, so it reads the same in light and dark mode on
 GitHub. Edit the boxes below and run it again; nothing else depends on it.
@@ -11,7 +11,7 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
-OUT = Path(__file__).with_name("architecture.svg")
+OUT = Path(__file__).resolve().parent.parent / "docs" / "architecture.svg"
 
 PALETTE = {
     "src": ("#e8f1ff", "#2f62c9"),
@@ -296,7 +296,7 @@ markers = "".join(
     f'<marker id="m{c[1:]}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" '
     f'markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{c}"/>'
     "</marker>"
-    for c in {stroke for _, stroke in PALETTE.values()} | {GREY}
+    for c in sorted({stroke for _, stroke in PALETTE.values()} | {GREY})
 )
 svg = (
     f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" '

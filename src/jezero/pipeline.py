@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 
 from .config import Config, ConnectorConfig
 from .connectors import CONNECTOR_TYPES
-from .connectors.base import Connector, RawDoc
+from .connectors.base import BuildContext, Connector, RawDoc
 from .models import NewItem, content_hash
 from .projects import ProjectRules
 from .redact import Redactor
@@ -46,67 +46,16 @@ def project_rules(config: Config) -> ProjectRules:
 
 
 def build_connector(config: Config, conn: ConnectorConfig) -> Connector:
-    if CONNECTOR_TYPES[conn.type].status != "available":
+    kind = CONNECTOR_TYPES[conn.type]
+    if kind.status != "available":
         raise NotImplementedError(f"connector type {conn.type!r} is not implemented yet")
-    if conn.type == "hermes":
-        from .connectors.hermes import HermesConnector
-
-        return HermesConnector(
-            conn.name,
-            conn.options,
-            max_segment_chars=config.summarizer.max_input_chars,
-            default_project=conn.project,
-        )
-    if conn.type == "claude_code":
-        from .connectors.claude_code import ClaudeCodeConnector
-
-        return ClaudeCodeConnector(
-            conn.name,
-            conn.options,
-            max_segment_chars=config.summarizer.max_input_chars,
-            default_project=conn.project,
-            project_rules=project_rules(config),
-        )
-    if conn.type == "codex":
-        from .connectors.codex import CodexConnector
-
-        return CodexConnector(
-            conn.name,
-            conn.options,
-            max_segment_chars=config.summarizer.max_input_chars,
-            default_project=conn.project,
-            project_rules=project_rules(config),
-        )
-    if conn.type == "opencode":
-        from .connectors.opencode import OpenCodeConnector
-
-        return OpenCodeConnector(
-            conn.name,
-            conn.options,
-            max_segment_chars=config.summarizer.max_input_chars,
-            default_project=conn.project,
-            project_rules=project_rules(config),
-        )
-    if conn.type == "antigravity":
-        from .connectors.antigravity import AntigravityConnector
-
-        return AntigravityConnector(
-            conn.name,
-            conn.options,
-            max_segment_chars=config.summarizer.max_input_chars,
-            default_project=conn.project,
-            project_rules=project_rules(config),
-        )
-    if conn.type == "paperclip":
-        from .connectors.paperclip import PaperclipConnector
-
-        return PaperclipConnector(
-            conn.name,
-            conn.options,
-            max_segment_chars=config.summarizer.max_input_chars,
-            default_project=conn.project,
-        )
-    raise NotImplementedError(f"connector type {conn.type!r} cannot run on a schedule")
+    if kind.build is None:
+        raise NotImplementedError(f"connector type {conn.type!r} cannot run on a schedule")
+    context = BuildContext(
+        max_segment_chars=config.summarizer.max_input_chars,
+        project_rules=project_rules(config),
+    )
+    return kind.build(conn, context)
 
 
 async def run_connector(

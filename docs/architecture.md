@@ -7,7 +7,7 @@ read by any number of agents over MCP.
 ![Architecture](architecture.svg)
 
 The same flow as a Mermaid graph (regenerate the picture with
-`python3 docs/make_architecture.py`):
+`python3 scripts/make_architecture.py`):
 
 ```mermaid
 flowchart LR

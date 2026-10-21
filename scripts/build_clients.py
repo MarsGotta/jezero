@@ -116,9 +116,21 @@ def plugins(base: Path) -> None:
     shutil.copy2(SRC / "opencode" / "jezero.ts", base / "opencode" / "jezero.ts")
 
 
+GENERATED_NOTE = """\
+# Generated: do not edit
+
+Installable copy of the Jezero plugins, so Claude Code and Codex can install them
+straight from this repository. `scripts/build_clients.py` writes it from `clients/`,
+which is the only place to change them; CI fails if this folder differs.
+
+How to install and connect a computer: [clients/README.md](../clients/README.md).
+"""
+
+
 def repo_copy(root: Path) -> None:
-    """The committed copy: plugins/ and the two marketplace files."""
+    """The committed copy: plugins/ (with a do-not-edit note) and the marketplace files."""
     plugins(root / REPO_PLUGINS)
+    (root / REPO_PLUGINS / "README.md").write_text(GENERATED_NOTE)
     marketplaces(root, f"{REPO_PLUGINS}/")
 
 

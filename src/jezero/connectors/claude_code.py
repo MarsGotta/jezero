@@ -20,11 +20,14 @@ import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..projects import DEFAULT_RULES, ProjectRules
 from ..store import ConnectorState
-from .base import Batch, RawDoc, segment, truncate_middle
+from .base import Batch, BuildContext, ConnectorType, RawDoc, segment, truncate_middle
+
+if TYPE_CHECKING:
+    from ..config import ConnectorConfig
 
 _STRIP = re.compile(
     r"<(system-reminder|memory-context)>.*?</\1>",
@@ -264,3 +267,21 @@ def _flatten(content: Any) -> str:
             if isinstance(b, dict) and b.get("type") == "text"
         ).strip()
     return ""
+
+
+def _build(conn: ConnectorConfig, ctx: BuildContext) -> ClaudeCodeConnector:
+    return ClaudeCodeConnector(
+        conn.name,
+        conn.options,
+        max_segment_chars=ctx.max_segment_chars,
+        default_project=conn.project,
+        project_rules=ctx.project_rules,
+    )
+
+
+CONNECTOR_TYPE = ConnectorType(
+    "claude_code",
+    "available",
+    "Claude Code session transcripts (*.jsonl under a projects directory).",
+    build=_build,
+)

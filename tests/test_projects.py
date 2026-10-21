@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jezero.projects import ProjectRules
+from jezero.projects import DEFAULT_RULES, ProjectRules
 
 
 def test_roots_are_case_insensitive_and_skip_generic_names() -> None:
@@ -51,3 +51,13 @@ def test_sidecar_from_the_device_wins(tmp_path: Path) -> None:
     rules = ProjectRules(aliases={"billing": "payments"})
     assert rules.project_for("/home/me/projects/other", session_file=session) == "payments"
     assert rules.project_for("/home/me/projects/other", session_file=tmp_path / "x") == "other"
+
+
+def test_default_rules_skip_tool_folders_and_ids() -> None:
+    rules = DEFAULT_RULES
+    assert rules.project_for("/w/projects/kit/.tool/worktrees/a/b") == "kit"
+    assert rules.project_for("/w/.tool/instances/projects/0f1e2d3c-aaaa-bbbb/x") is None
+    assert rules.project_for("/w/projects") is None
+    assert rules.project_for(None) is None
+    assert rules.project_for("/w/.tool/projects/-/memory") is None
+    assert rules.with_aliases({"app-wt": "app"}).project_for("/w/projects/app-wt/T-1") == "app"

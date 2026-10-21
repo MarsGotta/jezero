@@ -18,12 +18,15 @@ from __future__ import annotations
 import os
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from ..store import ConnectorState
-from .base import Batch, RawDoc, segment, truncate_middle
+from .base import Batch, BuildContext, ConnectorType, RawDoc, segment, truncate_middle
+
+if TYPE_CHECKING:
+    from ..config import ConnectorConfig
 
 
 def _ts(value: Any) -> float | None:
@@ -256,3 +259,20 @@ def _compact(value: Any) -> str:
     if isinstance(value, list):
         return ", ".join(_compact(v) for v in value)
     return str(value)
+
+
+def _build(conn: ConnectorConfig, ctx: BuildContext) -> PaperclipConnector:
+    return PaperclipConnector(
+        conn.name,
+        conn.options,
+        max_segment_chars=ctx.max_segment_chars,
+        default_project=conn.project,
+    )
+
+
+CONNECTOR_TYPE = ConnectorType(
+    "paperclip",
+    "available",
+    "Paperclip issues with comments, documents and decisions (read-only API).",
+    build=_build,
+)

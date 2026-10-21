@@ -19,11 +19,22 @@ import time
 from datetime import UTC, datetime
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, TYPE_CHECKING, Any
 
 from ..projects import DEFAULT_RULES, ProjectRules
 from ..store import ConnectorState
-from .base import READ_ONLY_COMMAND, Batch, PromptCleaner, RawDoc, segment
+from .base import (
+    READ_ONLY_COMMAND,
+    Batch,
+    BuildContext,
+    ConnectorType,
+    PromptCleaner,
+    RawDoc,
+    segment,
+)
+
+if TYPE_CHECKING:
+    from ..config import ConnectorConfig
 
 # Text blocks that Codex injects into "user" messages.
 _INJECTED_PREFIXES = (
@@ -303,3 +314,21 @@ def open_text(path: Path) -> IO[str]:
     raw = path.open("rb")
     stream = zstandard.ZstdDecompressor().stream_reader(raw, closefd=True)
     return io.TextIOWrapper(stream, encoding="utf-8", errors="replace")
+
+
+def _build(conn: ConnectorConfig, ctx: BuildContext) -> CodexConnector:
+    return CodexConnector(
+        conn.name,
+        conn.options,
+        max_segment_chars=ctx.max_segment_chars,
+        default_project=conn.project,
+        project_rules=ctx.project_rules,
+    )
+
+
+CONNECTOR_TYPE = ConnectorType(
+    "codex",
+    "available",
+    "OpenAI Codex CLI session transcripts (*.jsonl under a sessions directory).",
+    build=_build,
+)

@@ -16,11 +16,22 @@ import sqlite3
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..projects import DEFAULT_RULES, ProjectRules
 from ..store import ConnectorState
-from .base import READ_ONLY_COMMAND, Batch, PromptCleaner, RawDoc, segment
+from .base import (
+    READ_ONLY_COMMAND,
+    Batch,
+    BuildContext,
+    ConnectorType,
+    PromptCleaner,
+    RawDoc,
+    segment,
+)
+
+if TYPE_CHECKING:
+    from ..config import ConnectorConfig
 
 _READ_ONLY_TOOLS = {"read", "grep", "glob", "list", "todoread", "webfetch", "invalid"}
 
@@ -259,3 +270,21 @@ class OpenCodeConnector:
     def _clip(self, text: str) -> str:
         text = " ".join(text.split())
         return text if len(text) <= self.max_tool_args else text[: self.max_tool_args] + "..."
+
+
+def _build(conn: ConnectorConfig, ctx: BuildContext) -> OpenCodeConnector:
+    return OpenCodeConnector(
+        conn.name,
+        conn.options,
+        max_segment_chars=ctx.max_segment_chars,
+        default_project=conn.project,
+        project_rules=ctx.project_rules,
+    )
+
+
+CONNECTOR_TYPE = ConnectorType(
+    "opencode",
+    "available",
+    "OpenCode sessions from its SQLite store (read-only).",
+    build=_build,
+)

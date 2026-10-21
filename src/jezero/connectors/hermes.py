@@ -16,10 +16,13 @@ import time
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..store import ConnectorState
-from .base import Batch, RawDoc, segment
+from .base import Batch, BuildContext, ConnectorType, RawDoc, segment
+
+if TYPE_CHECKING:
+    from ..config import ConnectorConfig
 
 _INJECTED = re.compile(
     r"<(memory-context|system-reminder)>.*?</\1>|\[System note:.*?\]\s*", re.DOTALL
@@ -145,3 +148,20 @@ class HermesConnector:
                 args = args[: self.max_tool_args] + "..."
             rendered.append(f"{name} {args}")
         return rendered
+
+
+def _build(conn: ConnectorConfig, ctx: BuildContext) -> HermesConnector:
+    return HermesConnector(
+        conn.name,
+        conn.options,
+        max_segment_chars=ctx.max_segment_chars,
+        default_project=conn.project,
+    )
+
+
+CONNECTOR_TYPE = ConnectorType(
+    "hermes",
+    "available",
+    "Hermes Agent sessions from its state.db (read-only).",
+    build=_build,
+)

@@ -39,9 +39,18 @@ python3 scripts/build_clients.py --check   # plugins/ is generated from clients/
 ## Layout
 
 - `src/jezero/config.py`: TOML config and validation.
-- `src/jezero/store.py`: SQLite schema, upserts, BM25 + recency search.
-- `src/jezero/server.py`: MCP server, bearer auth, per-client source filtering.
+- `src/jezero/connectors/`: one module per source type; each declares its
+  `CONNECTOR_TYPE` and is discovered automatically (`__init__.py`, see CONTRIBUTING).
+- `src/jezero/projects.py`: project detection, shared with the device client (stdlib,
+  Python 3.9).
 - `src/jezero/redact.py`: secret redaction.
-- `src/jezero/ingest.py`: record to item conversion, JSONL import.
-- `src/jezero/connectors/`: connector registry and implementations.
-- `tests/`: unit tests and an end-to-end MCP test over real HTTP.
+- `src/jezero/summarize.py`: the summariser (Anthropic or OpenAI-compatible APIs).
+- `src/jezero/pipeline.py`: collect, redact, summarise, store for one connector.
+- `src/jezero/store.py`: SQLite schema, upserts, BM25 + recency search.
+- `src/jezero/server.py`: MCP server, bearer auth, per-client source filtering, device
+  inbox routes; `inbox.py` stores uploads.
+- `src/jezero/watchdog.py`, `cli.py`, `ingest.py`: health checks, commands, JSONL import.
+- `clients/`: device client and plugins (the source). `plugins/` and the two
+  `marketplace.json` files are generated from it by `scripts/build_clients.py`.
+- `scripts/`: build, privacy check, architecture diagram. `deploy/`: systemd units.
+- `tests/`: unit tests and end-to-end tests over real HTTP.

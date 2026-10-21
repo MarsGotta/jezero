@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-from ..projects import DEFAULT_RULES
+from ..projects import ProjectRules
 from ..store import ConnectorState
+
+if TYPE_CHECKING:
+    from ..config import ConnectorConfig
 
 
 @dataclass(slots=True)
@@ -53,6 +57,33 @@ class Connector(Protocol):
         ...
 
 
+@dataclass(frozen=True, slots=True)
+class BuildContext:
+    """What a connector may need from the global config to be built."""
+
+    max_segment_chars: int
+    project_rules: ProjectRules
+
+
+Status = Literal["available", "planned"]
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectorType:
+    """A connector type, as declared by the module that implements it.
+
+    `build` creates a connector from its `[[connectors]]` entry. Types without `build`
+    are listed (so `check-config` can tell a typo from a planned type) but never run on a
+    schedule.
+    """
+
+    name: str
+    status: Status
+    description: str
+    default_trust: Literal["own", "external"] = "own"
+    build: Callable[[ConnectorConfig, BuildContext], Connector] | None = None
+
+
 def truncate_middle(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
@@ -82,11 +113,6 @@ def segment(
     if current:
         segments.append(current)
     return segments
-
-
-def project_from_cwd(cwd: str | None, aliases: dict[str, str] | None = None) -> str | None:
-    """Project of a folder with the default rules (see `jezero.projects`)."""
-    return DEFAULT_RULES.with_aliases(aliases).project_for(cwd)
 
 
 READ_ONLY_COMMAND = re.compile(

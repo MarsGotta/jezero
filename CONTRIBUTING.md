@@ -17,3 +17,33 @@ Thanks for your interest. Jezero is early and small on purpose.
 
 By contributing you agree that your contributions are licensed under the Apache-2.0
 license of this project.
+
+## Adding a connector
+
+A connector is one file in `src/jezero/connectors/`. It reads a source incrementally
+(only what changed since the cursor in `ConnectorState`) and returns `RawDoc`s; the
+pipeline does redaction, summarising and storage. End the module with its type:
+
+```python
+def _build(conn: ConnectorConfig, ctx: BuildContext) -> MyConnector:
+    return MyConnector(
+        conn.name,
+        conn.options,
+        max_segment_chars=ctx.max_segment_chars,
+        default_project=conn.project,
+        project_rules=ctx.project_rules,  # if it knows the working directory
+    )
+
+
+CONNECTOR_TYPE = ConnectorType("mytool", "available", "What it reads.", build=_build)
+```
+
+That is all the registration there is: `jezero check-config` lists it and `jezero run`
+can schedule it. Add a test with synthetic files (see `tests/test_codex.py`), and an
+example entry in `jezero.example.toml`. New connectors should start with
+`enabled = false` in examples, so users run a pilot (`jezero run --connector NAME
+--sample 3`) before a full load.
+
+A connector can also live in its own package: expose its `ConnectorType` through the
+`jezero.connectors` entry point group and Jezero picks it up once installed.
+

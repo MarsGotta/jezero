@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 
-from jezero.connectors.base import project_from_cwd as _project_from_cwd
 from jezero.connectors.claude_code import ClaudeCodeConnector
 from jezero.store import ConnectorState
 
@@ -131,16 +130,6 @@ def test_collect_main_sessions_only_and_clean(tmp_path: Path) -> None:
 
     again = conn.collect(ConnectorState("agent-claude", cursor=batch.next_cursor), now=NOW)
     assert again.docs == []
-
-
-def test_project_from_cwd() -> None:
-    assert _project_from_cwd("/w/projects/Atlas") == "atlas"
-    assert _project_from_cwd("/w/projects/kit/.tool/worktrees/a/b") == "kit"
-    assert _project_from_cwd("/w/.tool/instances/projects/0f1e2d3c-aaaa-bbbb/x") is None
-    assert _project_from_cwd("/w/projects") is None
-    assert _project_from_cwd(None) is None
-    assert _project_from_cwd("/w/.tool/projects/-/memory") is None
-    assert _project_from_cwd("/w/projects/app-wt/T-1", {"app-wt": "app"}) == "app"
 
 
 def test_trivial_sessions_are_skipped(tmp_path: Path) -> None:
