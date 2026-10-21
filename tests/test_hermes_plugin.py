@@ -232,3 +232,15 @@ def test_plugin_throttles_uploads(tmp_path, monkeypatch) -> None:
     plugin._on_session_finalize(session_id="a")  # closing always sends
     plugin._on_session_end(session_id="")
     assert sent == ["a", "a"]
+
+
+def test_status_of_a_read_only_computer(server, tmp_path, monkeypatch, capsys) -> None:  # noqa: F811
+    url, _ = server
+    core = load_core(tmp_path / "jz", monkeypatch)
+    configure(core, url)
+    cfg_file = core.HOME / "client.json"
+    cfg = json.loads(cfg_file.read_text())
+    cfg["upload"] = False
+    cfg_file.write_text(json.dumps(cfg))
+    assert core.status() == 0
+    assert "read-only" in capsys.readouterr().out

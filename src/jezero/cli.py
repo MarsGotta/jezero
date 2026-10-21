@@ -282,7 +282,8 @@ def cmd_device_approve(config: Config, args: argparse.Namespace) -> int:
     block = [
         "",
         "[[clients]]",
-        f"# Device {name}: reads Jezero and uploads its sessions to the inbox.",
+        f"# Device {name}: reads Jezero"
+        + (" only." if args.read_only else " and uploads its sessions to the inbox."),
         f'name = "{name}"',
         f'token_sha256 = "{digest}"',
         f"sources = [{sources}]",

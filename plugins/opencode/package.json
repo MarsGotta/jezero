@@ -1,6 +1,6 @@
 {
   "name": "opencode-jezero",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Jezero for OpenCode: shared read-only memory of past agent work. Registers the Jezero MCP server, brings related past work into context and sends this computer's sessions to your Jezero server.",
   "type": "module",
   "main": "jezero.ts",

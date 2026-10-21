@@ -42,7 +42,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 HOME = Path(os.environ.get("JEZERO_CLIENT_HOME", "~/.jezero")).expanduser()
 CONFIG = HOME / "client.json"
 TOKEN_FILE = HOME / "token"
@@ -673,6 +673,15 @@ def status() -> int:
     if not cfg:
         print("not set up: run `init` first")
         return 1
+    if not uploads_enabled(cfg):
+        try:
+            sources = mcp_call(cfg, "list_sources", {}, 10)
+        except Exception as exc:  # noqa: BLE001 - report any failure, never a traceback
+            print(f"cannot read {cfg['url']}: {exc}")
+            return 1
+        count = len(sources.get("sources", [])) if isinstance(sources, dict) else 0
+        print(f"server {cfg['url']}: read-only, {count} readable sources")
+        return 0
     try:
         code, raw = _http(
             "GET", cfg["url"].rstrip("/") + "/inbox/v1/ping", cfg["token"], timeout=10
