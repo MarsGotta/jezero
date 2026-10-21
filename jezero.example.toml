@@ -189,3 +189,16 @@ realert_hours = 12                                 # repeat an alert at most thi
 # Where devices running the Jezero plugins upload their sessions (see clients/README.md).
 dir = "data/inbox"
 max_mb = 64
+
+[projects]
+# How a session's working folder becomes a project. First match wins:
+#   1. paths: explicit folders (`~` matches any home folder, on any computer)
+#   2. the git repository's name (for a worktree, the main repository's name)
+#   3. roots: the folder right below one of these names (case-insensitive)
+#   4. nothing: the summariser decides from the text
+# Devices running the Jezero plugins apply the same rules locally (in
+# ~/.jezero/client.json, key "projects") and send the result with each session.
+# paths = { "~/clients/acme" = "acme", "/srv/stacks" = "infra" }
+# roots = ["projects", "code", "dev", "src", "repos", "work"]
+# aliases = { "acme-web" = "acme" }
+git = true

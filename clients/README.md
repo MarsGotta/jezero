@@ -66,6 +66,16 @@ errors only go to `~/.jezero/client.log`.
    python3 ~/.jezero-src/jezero-client/jezero_client.py backfill --days 90
    ```
 
+## Projects
+
+Each session is tagged with a project, found on this computer: the git repository it ran
+in (for a worktree, the main repository), or the folder below `projects`, `code`, `dev`,
+`src`, `repos`... To set your own, add to `~/.jezero/client.json`:
+
+```json
+"projects": {"paths": {"~/clients/acme": "acme"}, "roots": ["work"], "aliases": {"acme-web": "acme"}}
+```
+
 ## Server side
 
 `jezero device approve NAME SHA256` adds the device as a client with `upload = true`

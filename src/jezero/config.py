@@ -203,6 +203,19 @@ class WatchdogConfig(_Strict):
     check calls it with status=up or status=down, so silence itself becomes an alert."""
 
 
+class ProjectsConfig(_Strict):
+    """How a session's folder maps to a project (see `jezero.projects`)."""
+
+    paths: dict[str, str] = Field(default_factory=dict)
+    """Folder -> project; `~` matches any home folder. Wins over everything else."""
+    roots: list[str] | None = None
+    """Folder names that hold projects; default: projects, code, dev, src, repos, ..."""
+    aliases: dict[str, str] = Field(default_factory=dict)
+    """Rename a detected project (`"atlas-wt" = "atlas"`)."""
+    git: bool = True
+    """Use the git repository's name when the folder exists on this computer."""
+
+
 class Config(_Strict):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
@@ -213,6 +226,7 @@ class Config(_Strict):
     redaction: RedactionConfig = Field(default_factory=RedactionConfig)
     watchdog: WatchdogConfig = Field(default_factory=WatchdogConfig)
     inbox: InboxConfig = Field(default_factory=InboxConfig)
+    projects: ProjectsConfig = Field(default_factory=ProjectsConfig)
 
     source_file: Path | None = Field(default=None, exclude=True)
 

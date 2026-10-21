@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import PurePath
 from typing import Any, Protocol
 
+from ..projects import DEFAULT_RULES
 from ..store import ConnectorState
 
 
@@ -84,27 +84,9 @@ def segment(
     return segments
 
 
-_UUIDISH = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-")
-_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$", re.IGNORECASE)
-_IGNORED_DIR_NAMES = {"projects", "worktrees", "src", "app"}
-
-
 def project_from_cwd(cwd: str | None, aliases: dict[str, str] | None = None) -> str | None:
-    """`.../projects/<name>/...` -> `<name>`, skipping ids and generic folder names.
-
-    `aliases` maps folder names to project slugs (for example a worktrees folder).
-    """
-    if not cwd:
-        return None
-    parts = PurePath(cwd).parts
-    for i, part in enumerate(parts[:-1]):
-        if part.lower() == "projects":
-            name = parts[i + 1]
-            if not _NAME.match(name) or _UUIDISH.match(name) or name in _IGNORED_DIR_NAMES:
-                continue
-            name = name.lower()
-            return (aliases or {}).get(name, name)
-    return None
+    """Project of a folder with the default rules (see `jezero.projects`)."""
+    return DEFAULT_RULES.with_aliases(aliases).project_for(cwd)
 
 
 READ_ONLY_COMMAND = re.compile(

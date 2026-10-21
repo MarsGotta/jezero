@@ -21,8 +21,9 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import IO, Any
 
+from ..projects import DEFAULT_RULES, ProjectRules
 from ..store import ConnectorState
-from .base import READ_ONLY_COMMAND, Batch, PromptCleaner, RawDoc, project_from_cwd, segment
+from .base import READ_ONLY_COMMAND, Batch, PromptCleaner, RawDoc, segment
 
 # Text blocks that Codex injects into "user" messages.
 _INJECTED_PREFIXES = (
@@ -51,6 +52,7 @@ class CodexConnector:
         *,
         max_segment_chars: int,
         default_project: str | None = None,
+        project_rules: ProjectRules | None = None,
     ) -> None:
         self.name = name
         # `sessions_dir` may be a glob: orchestrators give each agent its own CODEX_HOME,
@@ -69,6 +71,7 @@ class CodexConnector:
         self.skip_cwd_globs = list(options.get("skip_cwd_globs", []))
         self.min_chars = int(options.get("min_chars", 400))
         self.project_aliases = dict(options.get("project_aliases", {}))
+        self.rules = (project_rules or DEFAULT_RULES).with_aliases(self.project_aliases)
         self.prompt_cleaner = PromptCleaner(options)
         self.max_segment_chars = max_segment_chars
         self.default_project = default_project
@@ -174,7 +177,7 @@ class CodexConnector:
         if meta is None or not blocks or sum(len(b[2]) for b in blocks) < self.min_chars:
             return [], False
         session_id = str(meta.get("id") or meta.get("session_id") or path.stem)
-        project = project_from_cwd(meta.get("cwd"), self.project_aliases) or self.default_project
+        project = self.rules.project_for(meta.get("cwd"), session_file=path) or self.default_project
         title = titles.get(session_id)
         parts = segment(blocks, self.max_segment_chars)
         docs = []

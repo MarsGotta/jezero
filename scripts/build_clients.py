@@ -24,6 +24,8 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "clients"
 DIST = ROOT / "dist"
 OUT = DIST / "client"
+PROJECTS = ROOT / "src" / "jezero" / "projects.py"
+"""Project detection, shared with the server: shipped next to the core."""
 
 
 def version() -> str:
@@ -38,6 +40,7 @@ def plugin(agent: str) -> None:
     shutil.copytree(SRC / agent, target)
     (target / "core").mkdir()
     shutil.copy2(SRC / "core" / "jezero_client.py", target / "core" / "jezero_client.py")
+    shutil.copy2(PROJECTS, target / "core" / "jezero_projects.py")
     (target / "skills" / "jezero").mkdir(parents=True)
     shutil.copy2(SRC / "skill" / "SKILL.md", target / "skills" / "jezero" / "SKILL.md")
     for manifest in target.glob(".*-plugin/plugin.json"):
@@ -55,6 +58,7 @@ def main() -> int:
     (OUT / "opencode").mkdir()
     shutil.copy2(SRC / "opencode" / "jezero.ts", OUT / "opencode" / "jezero.ts")
     shutil.copy2(SRC / "core" / "jezero_client.py", OUT / "jezero_client.py")
+    shutil.copy2(PROJECTS, OUT / "jezero_projects.py")
     shutil.copy2(SRC / "README.md", OUT / "README.md")
 
     description = "Shared read-only memory of past agent work."

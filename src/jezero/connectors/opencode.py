@@ -18,8 +18,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ..projects import DEFAULT_RULES, ProjectRules
 from ..store import ConnectorState
-from .base import READ_ONLY_COMMAND, Batch, PromptCleaner, RawDoc, project_from_cwd, segment
+from .base import READ_ONLY_COMMAND, Batch, PromptCleaner, RawDoc, segment
 
 _READ_ONLY_TOOLS = {"read", "grep", "glob", "list", "todoread", "webfetch", "invalid"}
 
@@ -32,6 +33,7 @@ class OpenCodeConnector:
         *,
         max_segment_chars: int,
         default_project: str | None = None,
+        project_rules: ProjectRules | None = None,
     ) -> None:
         self.name = name
         default_db = "~/.local/share/opencode/opencode.db"
@@ -49,6 +51,7 @@ class OpenCodeConnector:
         self.include_subagents = bool(options.get("include_subagents", False))
         self.min_chars = int(options.get("min_chars", 400))
         self.project_aliases = dict(options.get("project_aliases", {}))
+        self.rules = (project_rules or DEFAULT_RULES).with_aliases(self.project_aliases)
         self.prompt_cleaner = PromptCleaner(options)
         self.max_segment_chars = max_segment_chars
         self.default_project = default_project
@@ -151,6 +154,7 @@ class OpenCodeConnector:
                 session.get("title"),
                 roles,
                 parts,
+                session_file=path,
             )
             processed.append(mtime)
             docs.extend(session_docs)
@@ -184,6 +188,7 @@ class OpenCodeConnector:
         title: str | None,
         roles: dict[str, tuple[str, dict[str, Any]]],
         parts: list[tuple[str, float, dict[str, Any]]],
+        session_file: Path | None = None,
     ) -> tuple[list[RawDoc], bool]:
         """Shared by the database and the plugin exports. Times are epoch milliseconds."""
         if parent_id and not self.include_subagents:
@@ -198,7 +203,9 @@ class OpenCodeConnector:
                 blocks.append((len(blocks), created / 1000, text))
         if sum(len(b[2]) for b in blocks) < self.min_chars:
             return [], False
-        project = project_from_cwd(directory, self.project_aliases) or self.default_project
+        project = (
+            self.rules.project_for(directory, session_file=session_file) or self.default_project
+        )
         agents = sorted({info.get("agent") for _, info in roles.values() if info.get("agent")})
         models = sorted({info.get("modelID") for _, info in roles.values() if info.get("modelID")})
         parts = segment(blocks, self.max_segment_chars)

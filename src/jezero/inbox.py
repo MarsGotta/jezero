@@ -24,6 +24,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from .projects import SIDECAR_SUFFIX
+
 AGENTS: dict[str, re.Pattern[str]] = {
     "claude-code": re.compile(r"projects/[A-Za-z0-9._-]{1,200}/[A-Za-z0-9._-]{1,200}\.jsonl"),
     "codex": re.compile(
@@ -82,12 +84,33 @@ def read_body(raw: bytes, *, encoding: str | None, max_bytes: int) -> bytes:
     return out.getvalue()
 
 
-def store(inbox_dir: Path, device: str, agent: str, relpath: str, data: bytes) -> Stored:
-    """Write atomically (temp file + rename); a newer upload of a session replaces it."""
+_PROJECT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def store(
+    inbox_dir: Path,
+    device: str,
+    agent: str,
+    relpath: str,
+    data: bytes,
+    project: str | None = None,
+) -> Stored:
+    """Write atomically (temp file + rename); a newer upload of a session replaces it.
+
+    `project` is what the device's client found for the session (its git repository or
+    configured folders); it goes next to the file as `<file>.project` for the connectors.
+    """
     target = target_path(inbox_dir, device, agent, relpath)
     if not data:
         raise InboxError("empty body")
+    if project is not None and not _PROJECT.match(project):
+        raise InboxError("invalid project name")
     target.parent.mkdir(parents=True, exist_ok=True)
+    sidecar = Path(str(target) + SIDECAR_SUFFIX)
+    if project:
+        sidecar.write_text(project + "\n", encoding="utf-8")
+    else:
+        sidecar.unlink(missing_ok=True)
     fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".upload-")
     try:
         with os.fdopen(fd, "wb") as handle:

@@ -50,6 +50,12 @@
   instructions now tell agents that decisions change and to check `later` before answering
   with a decision, plan or status. Each item summarises one session, so nothing else marks
   a decision as superseded.
+- Project detection without assumptions about folder names (`jezero.projects`, shared
+  by the connectors and the device client): configured `[projects] paths` first, then the
+  git repository (the main repository for worktrees), then common root folders
+  (`projects`, `code`, `dev`, `src`, `repos`... configurable, case-insensitive). Devices
+  send the project they found with each upload (`X-Jezero-Project`), stored next to the
+  session as `<file>.project`.
 - Stronger redaction: env-style names ending in a secret word (`GITHUB_TOKEN=`,
   `PGPASSWORD=`, `db_pass=`), quoted JSON keys, `--password X` flags, Basic auth, GitLab,
   npm, Hugging Face and Stripe tokens, Azure keys and signed URLs. References (`$VAR`,

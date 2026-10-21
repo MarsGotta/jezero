@@ -200,3 +200,21 @@ def test_project_folder_is_case_insensitive(
 ) -> None:
     core = load_core(tmp_path / "home", monkeypatch)
     assert core.project_from_cwd("/Users/me/Projects/Billing/web") == "billing"
+
+
+def test_upload_sends_the_project_found_on_the_device(
+    server, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    url, inbox = server
+    core = load_core(tmp_path / "home", monkeypatch)
+    configure(core, url)
+    repo = tmp_path / "anywhere" / "billing-api"
+    (repo / ".git").mkdir(parents=True)
+    transcript = tmp_path / ".claude" / "projects" / "-x-billing-api" / "s9.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text(json.dumps({"type": "user", "cwd": str(repo)}) + "\n")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / ".claude"))
+    core.backfill(["claude-code"], days=1)  # no cwd given: read from the transcript
+    assert core.flush(core.load_config())["sent"] == 1
+    landed = inbox / "laptop" / "claude-code" / "projects" / "-x-billing-api" / "s9.jsonl"
+    assert Path(str(landed) + ".project").read_text().strip() == "billing-api"

@@ -33,10 +33,10 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path, PurePath
+from pathlib import Path
 from typing import Any
 
-VERSION = "0.1.2"
+VERSION = "0.2.0"
 HOME = Path(os.environ.get("JEZERO_CLIENT_HOME", "~/.jezero")).expanduser()
 CONFIG = HOME / "client.json"
 TOKEN_FILE = HOME / "token"
@@ -224,22 +224,20 @@ def mcp_call(cfg: dict[str, Any], tool: str, args: dict[str, Any], timeout: floa
 
 # -------------------------------------------------------------------------- context
 
-_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-_UUIDISH = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-", re.I)
-_IGNORED = {"-", "src", "tmp", "worktrees"}
+try:  # shipped next to this file in every plugin
+    from jezero_projects import ProjectRules
+except ImportError:  # running from the repository
+    from jezero.projects import ProjectRules
+
+
+def project_rules() -> ProjectRules:
+    """`projects` in ~/.jezero/client.json: paths, roots, aliases, git (all optional)."""
+    data = _load_json(CONFIG, {})
+    return ProjectRules.from_dict(data.get("projects") if isinstance(data, dict) else None)
 
 
 def project_from_cwd(cwd: str | None) -> str | None:
-    """`.../projects/<name>/...` -> `<name>`, as the server's connectors derive it."""
-    if not cwd:
-        return None
-    parts = PurePath(cwd).parts
-    for i, part in enumerate(parts[:-1]):
-        if part.lower() == "projects":
-            name = parts[i + 1]
-            if _NAME.match(name) and not _UUIDISH.match(name) and name not in _IGNORED:
-                return name.lower()
-    return None
+    return project_rules().project_for(cwd)
 
 
 def _line(item: dict[str, Any]) -> str:
@@ -346,15 +344,41 @@ def relpath_for(agent: str, path: Path) -> str | None:
     return None
 
 
+def cwd_of(path: Path) -> str | None:
+    """The working folder recorded in a Claude Code or Codex transcript (first lines)."""
+    if path.suffix != ".jsonl":
+        return None
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for _, line in zip(range(50), handle):
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                payload = record.get("payload")
+                found = record.get("cwd") or (
+                    payload.get("cwd") if isinstance(payload, dict) else None
+                )
+                if isinstance(found, str) and found:
+                    return found
+    except OSError:
+        return None
+    return None
+
+
 def enqueue(agent: str, session_id: str, transcript: str, cwd: str | None) -> bool:
     path = Path(transcript).expanduser()
     if relpath_for(agent, path) is None:
         return False
+    cwd = cwd or cwd_of(path)
     pointer = {
         "agent": agent,
         "session_id": session_id,
         "path": str(path),
         "cwd": cwd,
+        "project": project_from_cwd(cwd),
         "queued_at": time.time(),
     }
     name = f"{agent}__{_safe(session_id or path.stem)}.json"
@@ -409,7 +433,7 @@ class _Lock:
                 self.path.unlink()
 
 
-def upload(cfg: dict[str, Any], agent: str, path: Path) -> bool:
+def upload(cfg: dict[str, Any], agent: str, path: Path, project: str | None = None) -> bool:
     relpath = relpath_for(agent, path)
     if relpath is None:
         return True  # nothing to send, not an error
@@ -420,7 +444,11 @@ def upload(cfg: dict[str, Any], agent: str, path: Path) -> bool:
         url,
         cfg["token"],
         body=gzip.compress(data),
-        headers={"Content-Encoding": "gzip", "Content-Type": "application/octet-stream"},
+        headers={
+            "Content-Encoding": "gzip",
+            "Content-Type": "application/octet-stream",
+            **({"X-Jezero-Project": project} if project else {}),
+        },
         timeout=60,
     )
     if status == 200:
@@ -457,7 +485,7 @@ def flush(cfg: dict[str, Any]) -> dict[str, int]:
                 pointer_file.unlink()
                 continue
             try:
-                upload(cfg, pointer["agent"], path)
+                upload(cfg, pointer["agent"], path, pointer.get("project"))
             except (OSError, RuntimeError, urllib.error.URLError) as exc:
                 counts["failed"] += 1
                 log(f"flush stopped at {path.name}: {exc}")
@@ -579,6 +607,9 @@ def _installed_core() -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     if Path(__file__).resolve() != target.resolve():
         shutil.copyfile(__file__, str(target))
+        projects = Path(__file__).with_name("jezero_projects.py")
+        if projects.is_file():
+            shutil.copyfile(str(projects), str(target.with_name("jezero_projects.py")))
     return target
 
 

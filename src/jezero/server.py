@@ -354,8 +354,9 @@ def _add_inbox_routes(app: Starlette, config: Config) -> None:
             data = inbox.read_body(
                 raw, encoding=request.headers.get("content-encoding"), max_bytes=max_bytes
             )
+            project = request.headers.get("x-jezero-project") or None
             stored = await asyncio.to_thread(
-                inbox.store, config.inbox_dir, name, agent, relpath, data
+                inbox.store, config.inbox_dir, name, agent, relpath, data, project
             )
         except inbox.InboxError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=exc.status)

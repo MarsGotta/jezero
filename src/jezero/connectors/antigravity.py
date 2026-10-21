@@ -31,8 +31,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from ..projects import DEFAULT_RULES, ProjectRules
 from ..store import ConnectorState
-from .base import READ_ONLY_COMMAND, Batch, PromptCleaner, RawDoc, project_from_cwd, segment
+from .base import READ_ONLY_COMMAND, Batch, PromptCleaner, RawDoc, segment
 
 USER_INPUT = 14
 AGENT_TURN = 15
@@ -117,6 +118,7 @@ class AntigravityConnector:
         *,
         max_segment_chars: int,
         default_project: str | None = None,
+        project_rules: ProjectRules | None = None,
     ) -> None:
         self.name = name
         default_dir = "~/.gemini/antigravity-cli"
@@ -129,6 +131,7 @@ class AntigravityConnector:
         self.min_chars = int(options.get("min_chars", 400))
         self.unreadable_min_steps = int(options.get("unreadable_min_steps", 2))
         self.project_aliases = dict(options.get("project_aliases", {}))
+        self.rules = (project_rules or DEFAULT_RULES).with_aliases(self.project_aliases)
         self.prompt_cleaner = PromptCleaner(options)
         self.max_segment_chars = max_segment_chars
         self.default_project = default_project
@@ -241,7 +244,7 @@ class AntigravityConnector:
         readable = bool(blocks) or len(rows) < self.unreadable_min_steps
         if sum(len(b[2]) for b in blocks) < self.min_chars:
             return [], readable
-        project = project_from_cwd(workspace, self.project_aliases) or self.default_project
+        project = self.rules.project_for(workspace) or self.default_project
         title = info.get("title")
         parts = segment(blocks, self.max_segment_chars)
         docs = []

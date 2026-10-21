@@ -22,8 +22,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ..projects import DEFAULT_RULES, ProjectRules
 from ..store import ConnectorState
-from .base import Batch, RawDoc, project_from_cwd, segment, truncate_middle
+from .base import Batch, RawDoc, segment, truncate_middle
 
 _STRIP = re.compile(
     r"<(system-reminder|memory-context)>.*?</\1>",
@@ -48,6 +49,7 @@ class ClaudeCodeConnector:
         *,
         max_segment_chars: int,
         default_project: str | None = None,
+        project_rules: ProjectRules | None = None,
     ) -> None:
         self.name = name
         self.root = Path(os.path.expanduser(str(options["projects_dir"])))
@@ -61,6 +63,7 @@ class ClaudeCodeConnector:
         self.skip_entrypoints = set(options.get("skip_entrypoints", []))
         self.min_chars = int(options.get("min_chars", 400))
         self.project_aliases = dict(options.get("project_aliases", {}))
+        self.rules = (project_rules or DEFAULT_RULES).with_aliases(self.project_aliases)
         self.skip_project_dirs = list(options.get("skip_project_dirs", []))
         """Globs on the project folder name (Claude Code's slug of the working directory)."""
         self.max_segment_chars = max_segment_chars
@@ -166,7 +169,7 @@ class ClaudeCodeConnector:
             return []
         if sum(len(b[2]) for b in blocks) < self.min_chars:
             return []  # trivial sessions (a single slash command, "hi") are not worth a call
-        project = project_from_cwd(cwd, self.project_aliases) or self.default_project
+        project = self.rules.project_for(cwd, session_file=path) or self.default_project
         parts = segment(blocks, self.max_segment_chars)
         docs = []
         for number, part in enumerate(parts, 1):

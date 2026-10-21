@@ -10,6 +10,7 @@ from .config import Config, ConnectorConfig
 from .connectors import CONNECTOR_TYPES
 from .connectors.base import Connector, RawDoc
 from .models import NewItem, content_hash
+from .projects import ProjectRules
 from .redact import Redactor
 from .store import ConnectorState, Store
 from .summarize import Summarizer, SummarizerError
@@ -39,6 +40,11 @@ class RunReport:
         return data
 
 
+def project_rules(config: Config) -> ProjectRules:
+    p = config.projects
+    return ProjectRules(paths=p.paths, roots=p.roots, aliases=p.aliases, git=p.git)
+
+
 def build_connector(config: Config, conn: ConnectorConfig) -> Connector:
     if CONNECTOR_TYPES[conn.type].status != "available":
         raise NotImplementedError(f"connector type {conn.type!r} is not implemented yet")
@@ -59,6 +65,7 @@ def build_connector(config: Config, conn: ConnectorConfig) -> Connector:
             conn.options,
             max_segment_chars=config.summarizer.max_input_chars,
             default_project=conn.project,
+            project_rules=project_rules(config),
         )
     if conn.type == "codex":
         from .connectors.codex import CodexConnector
@@ -68,6 +75,7 @@ def build_connector(config: Config, conn: ConnectorConfig) -> Connector:
             conn.options,
             max_segment_chars=config.summarizer.max_input_chars,
             default_project=conn.project,
+            project_rules=project_rules(config),
         )
     if conn.type == "opencode":
         from .connectors.opencode import OpenCodeConnector
@@ -77,6 +85,7 @@ def build_connector(config: Config, conn: ConnectorConfig) -> Connector:
             conn.options,
             max_segment_chars=config.summarizer.max_input_chars,
             default_project=conn.project,
+            project_rules=project_rules(config),
         )
     if conn.type == "antigravity":
         from .connectors.antigravity import AntigravityConnector
@@ -86,6 +95,7 @@ def build_connector(config: Config, conn: ConnectorConfig) -> Connector:
             conn.options,
             max_segment_chars=config.summarizer.max_input_chars,
             default_project=conn.project,
+            project_rules=project_rules(config),
         )
     if conn.type == "paperclip":
         from .connectors.paperclip import PaperclipConnector
