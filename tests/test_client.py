@@ -218,3 +218,19 @@ def test_upload_sends_the_project_found_on_the_device(
     assert core.flush(core.load_config())["sent"] == 1
     landed = inbox / "laptop" / "claude-code" / "projects" / "-x-billing-api" / "s9.jsonl"
     assert Path(str(landed) + ".project").read_text().strip() == "billing-api"
+
+
+def test_client_home_inside_a_sandboxed_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    core = load_core(tmp_path / "explicit", monkeypatch)
+    assert core.client_home() == tmp_path / "explicit"
+    monkeypatch.delenv("JEZERO_CLIENT_HOME")
+    monkeypatch.setenv("HOME", str(tmp_path / "user"))
+    agent = tmp_path / "agent-config"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(agent))
+    assert core.client_home() == tmp_path / "user" / ".jezero"  # no key there: user's home
+    (agent / "jezero").mkdir(parents=True)
+    (agent / "jezero" / "client.json").write_text("{}")
+    assert core.client_home() == agent / "jezero"
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR")
+    monkeypatch.setenv("CODEX_HOME", str(agent))
+    assert core.client_home() == agent / "jezero"

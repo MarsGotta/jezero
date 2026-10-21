@@ -42,8 +42,25 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.3.1"
-HOME = Path(os.environ.get("JEZERO_CLIENT_HOME", "~/.jezero")).expanduser()
+VERSION = "0.3.2"
+AGENT_HOME_VARS = ("CLAUDE_CONFIG_DIR", "CODEX_HOME")
+
+
+def client_home() -> Path:
+    """Where this device's key lives: `JEZERO_CLIENT_HOME`; else a `jezero` folder inside
+    the agent's own config folder when it holds a key (sandboxed agents, which cannot see
+    the user's home, keep their own key there); else `~/.jezero`."""
+    explicit = os.environ.get("JEZERO_CLIENT_HOME")
+    if explicit:
+        return Path(explicit).expanduser()
+    for var in AGENT_HOME_VARS:
+        base = os.environ.get(var)
+        if base and (Path(base).expanduser() / "jezero" / "client.json").is_file():
+            return Path(base).expanduser() / "jezero"
+    return Path("~/.jezero").expanduser()
+
+
+HOME = client_home()
 CONFIG = HOME / "client.json"
 TOKEN_FILE = HOME / "token"
 SPOOL = HOME / "spool"

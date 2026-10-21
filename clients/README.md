@@ -45,6 +45,10 @@ errors only go to `~/.jezero/client.log`.
    Send the printed `jezero device approve ...` line to whoever runs the server. It is a
    SHA-256 fingerprint, not a secret.
 
+   Agents in a sandbox that cannot see your home (each with its own `CLAUDE_CONFIG_DIR`
+   or `CODEX_HOME`) can carry their own key: run `init` with `JEZERO_CLIENT_HOME` set to
+   `<that folder>/jezero`, and the plugin finds it there.
+
    On the computer that runs the Jezero server, add `--no-upload`: its sessions are
    already read by the connectors, so the plugins there only give context and tools.
 
