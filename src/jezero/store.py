@@ -538,6 +538,57 @@ class Store:
         with self._read() as con:
             return [_row_to_item(r) for r in con.execute(sql, params).fetchall()]
 
+    def overview(
+        self,
+        *,
+        allowed_sources: Sequence[str] | None = None,
+        days: int = 14,
+        now: datetime | None = None,
+    ) -> dict[str, object]:
+        """Counts for a dashboard: per source (total, latest, items per day over the last
+        `days` UTC days, oldest first) and per project. Only `allowed_sources` are seen."""
+        from datetime import timedelta
+
+        sources = self.resolve_sources(allowed_sources)
+        if sources is not None and not sources:
+            return {"items": 0, "days": [], "sources": {}, "projects": {}}
+        today = (now or datetime.now(UTC)).astimezone(UTC).date()
+        day_list = [(today - timedelta(days=days - 1 - i)).isoformat() for i in range(days)]
+        where, params = "", []
+        if sources is not None:
+            where = f"WHERE source IN ({','.join('?' * len(sources))})"
+            params = list(sources)
+        with self._read() as con:
+            per_source: dict[str, dict[str, object]] = {
+                r["source"]: {"items": r["n"], "latest": r["latest"], "daily": [0] * days}
+                for r in con.execute(
+                    f"SELECT source, COUNT(*) AS n, MAX(occurred_at) AS latest FROM items "  # noqa: S608
+                    f"{where} GROUP BY source ORDER BY source",
+                    params,
+                )
+            }
+            index = {d: i for i, d in enumerate(day_list)}
+            joiner = "AND" if where else "WHERE"
+            for r in con.execute(
+                f"SELECT source, substr(occurred_at, 1, 10) AS day, COUNT(*) AS n FROM items "  # noqa: S608
+                f"{where} {joiner} substr(occurred_at, 1, 10) >= ? GROUP BY source, day",
+                [*params, day_list[0]],
+            ):
+                if r["day"] in index and r["source"] in per_source:
+                    daily = per_source[r["source"]]["daily"]
+                    assert isinstance(daily, list)
+                    daily[index[r["day"]]] = r["n"]
+            projects = {
+                r["project"]: {"items": r["n"], "latest": r["latest"]}
+                for r in con.execute(
+                    f"SELECT project, COUNT(*) AS n, MAX(occurred_at) AS latest FROM items "  # noqa: S608
+                    f"{where} {joiner} project IS NOT NULL GROUP BY project ORDER BY latest DESC",
+                    params,
+                )
+            }
+        total = sum(int(v["items"]) for v in per_source.values())  # type: ignore[call-overload]
+        return {"items": total, "days": day_list, "sources": per_source, "projects": projects}
+
     def stats(self) -> dict[str, object]:
         with self._read() as con:
             per_source = {

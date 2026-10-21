@@ -303,7 +303,43 @@ def build_server(config: Config, store: Store | None = None) -> tuple[MCPServer,
         host=server_cfg.host,
     )
     _add_inbox_routes(app, config)
+    _add_api_routes(app, config, store)
     return mcp, app
+
+
+def _add_api_routes(app: Starlette, config: Config, store: Store) -> None:
+    """`GET /api/v1/overview`: counts for the `jezero` dashboard, with any client key.
+
+    Kept out of MCP on purpose, so agents do not get one more tool to choose from.
+    """
+    import asyncio
+
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    verifier = StaticTokenVerifier(config.clients) if config.server.require_auth else None
+    clients = {c.name: c for c in config.clients}
+
+    async def overview(request: Request) -> JSONResponse:
+        name, sources, upload = "local", None, False
+        if verifier is not None:
+            scheme, _, token = request.headers.get("authorization", "").partition(" ")
+            access = await verifier.verify_token(token.strip()) if token else None
+            if scheme.lower() != "bearer" or access is None:
+                return JSONResponse({"ok": False, "error": "unknown token"}, status_code=401)
+            client = clients[access.client_id]
+            name, upload = client.name, client.upload
+            sources = None if "*" in client.sources else client.sources
+        try:
+            days = max(1, min(int(request.query_params.get("days", "14")), 90))
+        except ValueError:
+            days = 14
+        data = await asyncio.to_thread(store.overview, allowed_sources=sources, days=days)
+        body = {"ok": True, "device": name, "upload": upload, "version": __version__, **data}
+        return JSONResponse(body)
+
+    app.router.routes.append(Route("/api/v1/overview", overview, methods=["GET"]))
 
 
 def _add_inbox_routes(app: Starlette, config: Config) -> None:

@@ -51,7 +51,12 @@ def version() -> str:
 DESCRIPTION = "Shared read-only memory of past agent work."
 REPO_PLUGINS = "plugins"
 """Folder for the committed plugins, at the repository root."""
-REPO_FILES = (".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json")
+REPO_FILES = (
+    ".claude-plugin/marketplace.json",
+    ".agents/plugins/marketplace.json",
+    "src/jezero/client_core.py",
+)
+"""`src/jezero/client_core.py` is the core inside the package, for the `jezero` app."""
 
 
 def plugin(agent: str, target: Path) -> None:
@@ -136,6 +141,8 @@ def repo_copy(root: Path) -> None:
     plugins(root / REPO_PLUGINS)
     (root / REPO_PLUGINS / "README.md").write_text(GENERATED_NOTE)
     marketplaces(root, f"{REPO_PLUGINS}/")
+    (root / "src" / "jezero").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SRC / "core" / "jezero_client.py", root / "src" / "jezero" / "client_core.py")
 
 
 def same_tree(a: Path, b: Path) -> list[str]:

@@ -352,7 +352,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jezero", description=__doc__)
     parser.add_argument("--version", action="version", version=f"jezero {__version__}")
     parser.add_argument("-c", "--config", help="path to jezero.toml")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command")
+
+    from .ui.commands import add_commands
+
+    add_commands(sub)
 
     sub.add_parser("init", help="create or verify the database").set_defaults(fn=cmd_init)
     sub.add_parser(
@@ -424,7 +428,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command is None:
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            from .ui.app import run
+
+            return run()
+        parser.print_help()
+        return 0
     try:
         config = load_config(args.config) if getattr(args, "needs_config", True) else None
         return args.fn(config, args)

@@ -22,6 +22,8 @@ dependencies = [
     "httpx>=0.27",
     "uvicorn>=0.30",
     "zstandard>=0.22",
+    "textual>=8.2",
+    "rich>=14",
 ]
 
 [project.urls]
@@ -49,6 +51,7 @@ packages = ["src/jezero"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["src/jezero/client_core.py"]  # a copy of clients/core, linted there
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "S", "SIM"]
@@ -58,6 +61,7 @@ ignore = ["S101"]
 "tests/**" = ["S104", "S105", "S106", "S108", "S603", "S607"]
 "scripts/**" = ["S603", "S607"]  # fixed git invocations, no user input
 "scripts/make_architecture.py" = ["E501"]  # diagram labels are long strings
+"src/jezero/ui/data.py" = ["S603"]  # fixed install commands, shown to the user first
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

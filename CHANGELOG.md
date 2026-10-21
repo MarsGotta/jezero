@@ -59,6 +59,13 @@
   OpenCode's skills folder.
 - `init --no-upload` for computers that only read Jezero (the server's own computer).
 - Client 0.3.1: `status` on a read-only computer checks reading, not uploading.
+- The Jezero app: `jezero` with no command opens a terminal app (Textual) with Home,
+  Search (with "newer on this subject"), Timeline, Agents (detect, install and update the
+  plugins on this computer) and Agent view (the exact context an agent receives). Night
+  and dawn themes; `jezero ui --demo` runs it on made-up data. People commands:
+  `jezero connect`, `find`, `show --newer`, `agents`. New `GET /api/v1/overview` (any
+  client key, only its sources) feeds the dashboard without adding an MCP tool. The
+  client core ships inside the package as `jezero/client_core.py` (generated).
 - Antigravity plugin (`plugins/antigravity`, client 0.4.0): the MCP server through a local
   stdio bridge (`jezero_client.py mcp`, so the key never sits in Antigravity's config),
   the protocol and recent work at SessionStart, related past work before the first model

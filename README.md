@@ -65,6 +65,36 @@ plugins that bring sessions from other computers, unattended runs and the watchd
 implemented and tested. Email comes next.
 `jezero check-config` tells you which connector types are available in your version.
 
+## The Jezero app
+
+Jezero is for agents, but you can look too. `jezero` with no command opens a terminal app
+that searches the library the way an agent does, shows what each source has been doing,
+and installs or updates the plugins of the agents on this computer.
+
+<p align="center">
+  <img src="docs/app/home.svg" width="100%"
+       alt="The Jezero app home: the name in block letters, counters, a 14-day activity chart, projects, sources and the latest memories.">
+</p>
+
+```bash
+uv tool install git+https://github.com/MarsGotta/jezero   # the `jezero` command
+jezero connect          # create this computer's key (the admin approves it once)
+jezero                  # the app; or try it first with: jezero ui --demo
+```
+
+- **Home** (`1`): how much Jezero holds, activity per day, per project and per source.
+- **Search** (`2`): results and the whole memory with its atoms; `l` checks whether a
+  later session changed it, as agents are told to do.
+- **Timeline** (`3`): what happened, day by day, in each project.
+- **Agents** (`4`): Claude Code, Codex, OpenCode, Hermes Agent and Antigravity on this
+  computer, with the Jezero version each one runs; install or update with a button.
+- **Agent view** (`5`): the exact context an agent receives at session start and before
+  its first answer, for a project and a first message of your choice.
+
+`t` switches between the night and dawn themes, `ctrl+p` opens the command palette. For
+scripts: `jezero find WORDS`, `jezero show ID --newer`, `jezero agents`. More screens in
+[docs/app](docs/app).
+
 ## Why this design
 
 - **Write once, read many.** The expensive step (a cheap LLM summarising a session) runs

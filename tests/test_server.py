@@ -141,6 +141,21 @@ def test_inbox_ping_and_upload(server_url: str, tmp_path) -> None:
     assert httpx2.put(url, content=b"x", headers=agent).status_code == 403
 
 
+def test_overview_counts_only_what_the_key_may_read(server_url: str) -> None:
+    url = _base(server_url) + "/api/v1/overview"
+    assert httpx2.get(url, timeout=10).status_code == 401
+    assert httpx2.get(url, headers={"Authorization": "Bearer nope"}, timeout=10).status_code == 401
+    admin = httpx2.get(url, headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}, timeout=10).json()
+    assert admin["device"] == "admin" and admin["items"] == 2 and len(admin["days"]) == 14
+    assert set(admin["sources"]) == {"agent-x", "mail-personal"}
+    assert all(len(s["daily"]) == 14 for s in admin["sources"].values())
+    agent = httpx2.get(
+        url + "?days=3", headers={"Authorization": f"Bearer {AGENT_TOKEN}"}, timeout=10
+    ).json()
+    assert set(agent["sources"]) == {"agent-x"} and agent["items"] == 1 and len(agent["days"]) == 3
+    assert agent["upload"] is False
+
+
 def test_rejects_missing_or_wrong_token(server_url: str) -> None:
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
     headers = {"Accept": "application/json, text/event-stream"}
