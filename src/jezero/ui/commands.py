@@ -70,7 +70,9 @@ def cmd_show(args: argparse.Namespace) -> int:
         console.print(Text(f"No memory #{args.id} that this key can read.", style=P.error))
         return 1
     newer = backend.later(args.id) if args.newer else None
-    console.print(Panel(item_view(item, P, newer), border_style=P.faint, padding=(1, 2)))
+    hint = f"add --newer to check whether something newer changed #{args.id}"
+    view = item_view(item, P, newer, hint=hint)
+    console.print(Panel(view, border_style=P.faint, padding=(1, 2)))
     return 0
 
 
@@ -138,27 +140,27 @@ def add_commands(sub: Any) -> None:
     p.set_defaults(fn=lambda _c, a: cmd_ui(a), needs_config=False)
 
     p = sub.add_parser("find", help="search Jezero with this computer's key, like an agent")
-    p.add_argument("query", nargs="+")
-    p.add_argument("--project")
-    p.add_argument("--limit", type=int, default=10)
-    p.add_argument("--demo", action="store_true")
+    p.add_argument("query", nargs="+", help="2 to 5 distinctive words")
+    p.add_argument("--project", help="only this project")
+    p.add_argument("--limit", type=int, default=10, help="maximum results")
+    p.add_argument("--demo", action="store_true", help="made-up data, no server needed")
     p.set_defaults(fn=lambda _c, a: _guard(cmd_find, a), needs_config=False)
 
     p = sub.add_parser("show", help="one memory in full; --newer checks if it changed later")
-    p.add_argument("id", type=int)
-    p.add_argument("--newer", action="store_true")
-    p.add_argument("--demo", action="store_true")
+    p.add_argument("id", type=int, help="item id, as shown by `find` (#123)")
+    p.add_argument("--newer", action="store_true", help="also list newer items on the subject")
+    p.add_argument("--demo", action="store_true", help="made-up data, no server needed")
     p.set_defaults(fn=lambda _c, a: _guard(cmd_show, a), needs_config=False)
 
     p = sub.add_parser("agents", help="which agents on this computer use Jezero")
-    p.add_argument("--demo", action="store_true")
+    p.add_argument("--demo", action="store_true", help="made-up data, no server needed")
     p.set_defaults(fn=lambda _c, a: _guard(cmd_agents, a), needs_config=False)
 
     p = sub.add_parser("connect", help="create this computer's key (asks what it needs)")
-    p.add_argument("--url")
-    p.add_argument("--device")
-    p.add_argument("--read-only", action="store_true")
-    p.add_argument("--force", action="store_true")
+    p.add_argument("--url", help="the server, https://YOUR-JEZERO (asked if missing)")
+    p.add_argument("--device", help="a name for this computer (asked if missing)")
+    p.add_argument("--read-only", action="store_true", help="search only, never upload")
+    p.add_argument("--force", action="store_true", help="replace this computer's key")
     p.set_defaults(fn=lambda _c, a: cmd_connect(a), needs_config=False)
 
 

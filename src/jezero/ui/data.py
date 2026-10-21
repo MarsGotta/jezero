@@ -36,15 +36,21 @@ AGENT_BINARIES = {
     "antigravity": "agy",
 }
 REPO = "MarsGotta/jezero"
-INSTALL_COMMANDS = {
-    "hermes": ["hermes", "plugins", "install", f"{REPO}/plugins/hermes", "--enable"],
-    "antigravity": [
-        "agy",
-        "plugin",
-        "install",
-        f"https://github.com/{REPO}/tree/main/plugins/antigravity",
-    ],
-}
+AGY_URL = f"https://github.com/{REPO}/tree/main/plugins/antigravity"
+_HERE = Path(__file__).resolve().parent.parent
+OPENCODE_PLUGIN = next(
+    (
+        p
+        for p in (_HERE / "_plugins" / "opencode", _HERE.parent.parent / "plugins" / "opencode")
+        if (p / "jezero.ts").is_file()
+    ),
+    _HERE / "_plugins" / "opencode",
+)
+"""The OpenCode plugin folder: inside the installed package, or in a source checkout."""
+
+Step = tuple[list[str], bool]
+"""A command, and whether the plan may go on when it fails (adding a marketplace that
+is already there fails harmlessly)."""
 
 
 class BackendError(RuntimeError):
@@ -71,10 +77,45 @@ class AgentStatus:
         return bool(self.installed and self.version and _vkey(self.version) < _vkey(self.latest))
 
     @property
+    def plan(self) -> list[Step]:
+        """The commands that install Jezero in this agent, or update it when installed.
+        They are the ones in docs/how-to/connect-agents.md."""
+        setup = [sys.executable, str(Path(core.__file__)), "setup", "--agent", self.agent]
+        update = self.installed
+        if self.agent == "claude-code":
+            if update:
+                return [
+                    (["claude", "plugin", "marketplace", "update", "jezero"], True),
+                    (["claude", "plugin", "update", "jezero@jezero"], False),
+                ]
+            return [
+                (["claude", "plugin", "marketplace", "add", REPO], True),
+                (["claude", "plugin", "install", "jezero@jezero"], False),
+                (setup, False),
+            ]
+        if self.agent == "codex":
+            if update:
+                return [
+                    (["codex", "plugin", "marketplace", "upgrade", "jezero"], True),
+                    (["codex", "plugin", "add", "jezero@jezero"], False),
+                ]
+            return [
+                (["codex", "plugin", "marketplace", "add", REPO], True),
+                (["codex", "plugin", "add", "jezero@jezero"], False),
+                (setup, False),
+            ]
+        if self.agent == "opencode":
+            return [([*setup, "--opencode-plugin", str(OPENCODE_PLUGIN)], False)]
+        if self.agent == "hermes":
+            if update:
+                return [(["hermes", "plugins", "update", "jezero"], False)]
+            return [(["hermes", "plugins", "install", f"{REPO}/plugins/hermes", "--enable"], False)]
+        return [(["agy", "plugin", "install", AGY_URL], False)]
+
+    @property
     def install_command(self) -> list[str]:
-        if self.agent in INSTALL_COMMANDS:
-            return INSTALL_COMMANDS[self.agent]
-        return [sys.executable, str(Path(core.__file__)), "setup", "--agent", self.agent]
+        """The plan as one line, for display."""
+        return [w for i, (cmd, _) in enumerate(self.plan) for w in ([*(["&&"] if i else []), *cmd])]
 
 
 class Backend(Protocol):
@@ -305,14 +346,17 @@ def last_seen(sources: dict[str, Any], agent: str) -> str | None:
 
 
 def run_install(status: AgentStatus) -> tuple[bool, str]:
-    """Install or update Jezero in one agent. Returns (ok, output)."""
-    try:
-        done = subprocess.run(
-            status.install_command, capture_output=True, text=True, timeout=300, check=False
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, str(exc)
-    return done.returncode == 0, (done.stdout + done.stderr).strip()
+    """Install or update Jezero in one agent, step by step. Returns (ok, output)."""
+    output: list[str] = []
+    for command, may_fail in status.plan:
+        try:
+            done = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return False, "\n".join([*output, str(exc)])
+        output.append((done.stdout + done.stderr).strip())
+        if done.returncode != 0 and not may_fail:
+            return False, "\n".join(output)
+    return True, "\n".join(o for o in output if o)
 
 
 # -------------------------------------------------------------------------------- demo

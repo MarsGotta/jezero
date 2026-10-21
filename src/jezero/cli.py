@@ -365,17 +365,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("stats", help="item counts per source").set_defaults(fn=cmd_stats)
 
     p = sub.add_parser("search", help="search from the terminal (admin: sees every source)")
-    p.add_argument("query")
-    p.add_argument("--source")
-    p.add_argument("--project")
-    p.add_argument("--limit", type=int)
+    p.add_argument("query", help="words to look for (matching is literal)")
+    p.add_argument("--source", help="only this source")
+    p.add_argument("--project", help="only this project")
+    p.add_argument("--limit", type=int, help="maximum results (default: search.default_limit)")
     p.set_defaults(fn=cmd_search)
 
     p = sub.add_parser("import-jsonl", help="import pre-summarised items from a JSONL file")
-    p.add_argument("path")
-    p.add_argument("--source", required=True)
-    p.add_argument("--project")
-    p.add_argument("--trust", choices=["own", "external"], default="own")
+    p.add_argument("path", help="JSONL file, one item per line")
+    p.add_argument("--source", required=True, help="source name for the imported items")
+    p.add_argument("--project", help="project for items that do not name one")
+    p.add_argument("--trust", choices=["own", "external"], default="own", help="trust of the items")
     p.set_defaults(fn=cmd_import_jsonl)
 
     p = sub.add_parser("new-token", help="generate a client token and its SHA-256 digest")
@@ -392,13 +392,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("redact-stored", help="apply the current redaction rules to stored items")
-    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--dry-run", action="store_true", help="count secrets without writing")
     p.set_defaults(fn=cmd_redact_stored)
 
     p = sub.add_parser("device", help="devices that upload sessions (Jezero plugins)")
     dsub = p.add_subparsers(dest="device_command", required=True)
     d = dsub.add_parser("approve", help="accept a device key printed by `jezero_client init`")
-    d.add_argument("name")
+    d.add_argument("name", help="name of the device, as given to `jezero_client init`")
     d.add_argument("digest", help="sha256 of the device key, as printed by the client")
     d.add_argument("--sources", nargs="+", default=["agent-*"], help="what it may read")
     d.add_argument(
@@ -415,7 +415,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_resummarize)
 
     p = sub.add_parser("retag", help="re-apply project hints from the source, without the LLM")
-    p.add_argument("--connector", required=True)
+    p.add_argument("--connector", required=True, help="connector whose items are retagged")
     p.add_argument("--dry-run", action="store_true", help="count changes without writing")
     p.set_defaults(fn=cmd_retag)
 

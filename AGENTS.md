@@ -34,6 +34,8 @@ uv run ruff format --check src tests scripts clients
 python3 scripts/privacy_check.py --all
 python3 scripts/build_clients.py && uv run --no-project --python 3.9 python dist/client/jezero_client.py --version
 python3 scripts/build_clients.py --check   # plugins/ is generated from clients/, never edit it
+uv run python scripts/make_reference.py --check   # docs/reference/{cli,configuration}.md
+uv run python scripts/check_docs.py               # links and anchors in every .md
 ```
 
 ## Layout

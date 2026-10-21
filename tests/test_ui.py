@@ -102,7 +102,30 @@ def test_detect_agents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert found["hermes"].installed and found["hermes"].notes == ["profiles: main"]
     assert not found["antigravity"].installed
     assert found["antigravity"].install_command[:3] == ["agy", "plugin", "install"]
-    assert found["claude-code"].install_command[-2:] == ["--agent", "claude-code"]
+    assert [c[:3] for c, _ in found["claude-code"].plan] == [
+        ["claude", "plugin", "marketplace"],
+        ["claude", "plugin", "update"],
+    ]
+    missing = found["claude-code"]
+    missing.installed = False
+    steps = [c for c, _ in missing.plan]
+    assert steps[1] == ["claude", "plugin", "install", "jezero@jezero"]
+    assert steps[2][-2:] == ["--agent", "claude-code"]
+    opencode = found["opencode"].plan[0][0]
+    assert opencode[-2] == "--opencode-plugin" and Path(opencode[-1], "jezero.ts").is_file()
+
+
+def test_run_install_stops_at_a_real_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from jezero.ui import data
+
+    status = DemoBackend().agents()[0]
+    plan = [(["sh", "-c", "exit 1"], True), (["sh", "-c", "echo two"], False)]
+    monkeypatch.setattr(type(status), "plan", property(lambda self: plan))
+    assert data.run_install(status) == (True, "two")
+    plan[1] = (["sh", "-c", "echo bad; exit 3"], False)
+    plan.append((["sh", "-c", "echo never"], False))
+    ok, out = data.run_install(status)
+    assert not ok and "bad" in out and "never" not in out
 
 
 def test_helpers() -> None:

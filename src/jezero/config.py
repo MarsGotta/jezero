@@ -27,11 +27,12 @@ _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", use_attribute_docstrings=True)
 
 
 class StorageConfig(_Strict):
     path: Path = Path("data/jezero.db")
+    """The SQLite file (created by `jezero init`). Relative to the config file."""
     tokenizer: str = "trigram remove_diacritics 1"
     """FTS5 tokenizer. The default matches plurals as substrings and ignores accents."""
 
@@ -45,22 +46,30 @@ class StorageConfig(_Strict):
 
 class SearchConfig(_Strict):
     default_limit: int = Field(10, ge=1, le=100)
+    """Results returned when a caller does not ask for a number."""
     max_limit: int = Field(50, ge=1, le=500)
+    """Most results any single call may return, whatever it asks for."""
     candidate_pool: int = Field(200, ge=10, le=5000)
     """How many BM25 candidates are re-ranked by recency."""
     recency_half_life_days: float = Field(90.0, gt=0)
+    """Age at which the recency boost of an item is half that of a new one."""
     recency_weight: float = Field(0.3, ge=0.0, le=1.0)
     """0 = pure BM25, 1 = relevance fully scaled by recency."""
 
 
 class SummarizerConfig(_Strict):
     provider: Literal["anthropic", "openai_compatible"] = "anthropic"
+    """API dialect: Anthropic Messages, or any OpenAI-compatible chat endpoint."""
     base_url: str = "https://api.anthropic.com"
+    """Endpoint of the provider (for example a local OpenAI-compatible server)."""
     model: str | None = None
     """Use a cheap, fast model. Required before running any connector."""
     api_key_env: str = "JEZERO_SUMMARIZER_API_KEY"
+    """Environment variable holding the provider's API key."""
     max_concurrency: int = Field(4, ge=1, le=64)
+    """Summaries requested in parallel."""
     timeout_seconds: float = Field(120.0, gt=0)
+    """Time allowed for one summary request."""
     max_input_chars: int = Field(60_000, ge=1_000)
     """Longer inputs are split into parts, each summarised on its own."""
     known_projects: list[str] = Field(default_factory=list)
@@ -72,13 +81,17 @@ class SummarizerConfig(_Strict):
 
 class ServerConfig(_Strict):
     host: str = "127.0.0.1"
+    """Address to listen on. Keep loopback and publish through a reverse proxy."""
     port: int = Field(8765, ge=1, le=65535)
+    """Port to listen on."""
     path: str = "/mcp"
+    """URL path of the MCP endpoint."""
     public_url: str | None = None
     """External URL when served behind a reverse proxy, e.g. https://library.example.org/mcp"""
     allowed_hosts: list[str] = Field(default_factory=list)
     """Extra Host header values accepted (DNS-rebinding protection). Derived from public_url."""
     require_auth: bool = True
+    """Ask every request for a client key. May be turned off only on a loopback host."""
     client_bundle: Path | None = Path("dist/jezero-client.tar.gz")
     """Plugin bundle offered at /client/jezero-client.tar.gz (public code, no auth)."""
 
@@ -109,6 +122,7 @@ class ClientConfig(_Strict):
     """An agent (or person) allowed to query the library over MCP."""
 
     name: str
+    """Unique name: lowercase letters, digits, - and _ (a device's name for plugins)."""
     token_env: str | None = None
     """Environment variable holding the client's bearer token."""
     token_sha256: str | None = None
@@ -143,6 +157,7 @@ class InboxConfig(_Strict):
     """Where devices deliver raw session files (see `jezero.inbox`)."""
 
     dir: Path = Path("data/inbox")
+    """Folder for uploads, one subfolder per device. Relative to the config file."""
     max_mb: float = Field(64.0, gt=0)
     """Largest accepted file, after decompression."""
 
@@ -151,12 +166,17 @@ class ConnectorConfig(_Strict):
     """One configured source. `type` selects the implementation, `name` identifies it."""
 
     name: str
+    """Unique name, which becomes the `source` of its items (`agent-codex-laptop`)."""
     type: str
+    """Connector type: see the connectors reference."""
     enabled: bool = True
+    """Disabled connectors keep their cursor and are skipped by `jezero run`."""
     interval_minutes: int = Field(15, ge=1)
+    """How often `jezero run --due` runs it."""
     project: str | None = None
     """Default project for items from this source, when the connector cannot infer one."""
     trust: Literal["own", "external"] = "own"
+    """`own` for your agents' work; `external` for text written by others (mail)."""
     options: dict[str, Any] = Field(default_factory=dict)
     """Type-specific settings (paths, filters). Secrets go through *_env keys only."""
 
@@ -180,6 +200,7 @@ class ConnectorConfig(_Strict):
 
 class RedactionConfig(_Strict):
     enabled: bool = True
+    """Redact known secret formats (keys, tokens, passwords) before storing anything."""
     extra_patterns: list[str] = Field(default_factory=list)
     """Additional regular expressions to redact before summarising and indexing."""
 

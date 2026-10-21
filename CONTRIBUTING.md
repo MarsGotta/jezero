@@ -15,6 +15,20 @@ Thanks for your interest. Jezero is early and small on purpose.
 5. Never include real transcripts, emails or personal details in issues, tests or
    fixtures. Use synthetic data.
 
+## Documentation
+
+The docs live in [`docs/`](docs/README.md) and follow [docs/STYLE.md](docs/STYLE.md):
+tutorials, how-to guides, reference and explanation, each in its folder. A change that
+users can see comes with its docs in the same pull request.
+
+- `docs/reference/cli.md` and `docs/reference/configuration.md` are generated from the
+  code. Change the help text or the docstring, then run
+  `uv run python scripts/make_reference.py`.
+- `docs/app/*.svg` are real screenshots of the app on demo data:
+  `uv run python scripts/make_screenshots.py`.
+- `uv run python scripts/check_docs.py` checks every relative link and anchor. CI runs
+  all three checks.
+
 By contributing you agree that your contributions are licensed under the Apache-2.0
 license of this project.
 

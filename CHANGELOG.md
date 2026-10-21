@@ -59,6 +59,13 @@
   OpenCode's skills folder.
 - `init --no-upload` for computers that only read Jezero (the server's own computer).
 - Client 0.3.1: `status` on a read-only computer checks reading, not uploading.
+- Documentation rewritten and organised by Diátaxis in `docs/`: two tutorials, seven
+  how-to guides, seven reference pages, five explanation pages, a glossary and a style
+  guide. The command and configuration references are generated from the code
+  (`scripts/make_reference.py`); `scripts/check_docs.py` checks every link and anchor.
+  Both run in CI.
+- The app's Install and Update buttons run the full documented steps for each agent
+  (plugin, MCP server), not only `setup`; the package ships the OpenCode plugin for it.
 - The Jezero app: `jezero` with no command opens a terminal app (Textual) with Home,
   Search (with "newer on this subject"), Timeline, Agents (detect, install and update the
   plugins on this computer) and Agent view (the exact context an agent receives). Night

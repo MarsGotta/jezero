@@ -23,6 +23,10 @@ jobs:
       - run: python3 scripts/privacy_check.py --all
       - name: Committed plugins match clients/
         run: python3 scripts/build_clients.py --check
+      - name: Generated reference pages match the code
+        run: uv run python scripts/make_reference.py --check
+      - name: Documentation links and anchors resolve
+        run: uv run python scripts/check_docs.py
       - name: Device client still runs on Python 3.9 with the standard library only
         run: |
           python3 scripts/build_clients.py

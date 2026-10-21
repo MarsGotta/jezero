@@ -188,7 +188,9 @@ def _int(n: Any) -> str:
 # --------------------------------------------------------------------------- renderers
 
 
-def item_view(item: dict[str, Any], p: Palette, newer: list[dict] | None = None) -> Group:
+def item_view(
+    item: dict[str, Any], p: Palette, newer: list[dict] | None = None, hint: str | None = None
+) -> Group:
     """One memory: title, where it comes from, summary, atoms, questions, newer items."""
     parts: list[Any] = []
     parts.append(Text(str(item.get("title") or "(untitled)"), style=f"bold {p.foreground}"))
@@ -240,10 +242,8 @@ def item_view(item: dict[str, Any], p: Palette, newer: list[dict] | None = None)
                 )
             )
     elif item.get("id") is not None:
-        parts += [
-            Text(),
-            Text("press  l  to check whether something newer changed this", style=p.muted),
-        ]
+        hint = hint or "press  l  to check whether something newer changed this"
+        parts += [Text(), Text(hint, style=p.muted)]
     return Group(*parts)
 
 
@@ -470,12 +470,14 @@ class ConfirmInstall(ModalScreen[bool]):
         verb = "Update" if s.outdated else "Reinstall" if s.installed else "Install"
         text = Text()
         text.append(f"{verb} Jezero in {s.name}\n\n", style=f"bold {p.foreground}")
-        text.append("This changes the agent's configuration on this computer:\n", style=p.muted)
         text.append(
-            "the Jezero plugin, its MCP server and its hooks. Nothing else.\n\n", style=p.muted
+            "These commands run in order and change the agent's configuration on this\n"
+            "computer: the Jezero plugin, its MCP server and its hooks. Nothing else.\n\n",
+            style=p.muted,
         )
-        text.append("❯ ", style=f"bold {p.teal}")
-        text.append(" ".join(s.install_command), style=p.teal)
+        for command, _ in s.plan:
+            text.append("❯ ", style=f"bold {p.teal}")
+            text.append(" ".join(command) + "\n", style=p.teal)
         with Vertical(id="modal"):
             yield Static(text)
             with Horizontal(id="modal-buttons"):
@@ -497,8 +499,8 @@ class ConnectScreen(ModalScreen[bool]):
         intro = Text()
         intro.append("Connect this computer to Jezero\n\n", style=f"bold {p.foreground}")
         intro.append(
-            "Jezero creates a key here; the key never leaves this computer. The server's "
-            "admin approves its fingerprint once.\n",
+            "Jezero creates a key here and keeps it here. The server only stores its "
+            "fingerprint, which its admin approves once.\n",
             style=p.muted,
         )
         with Vertical(id="modal"), Vertical(id="connect"):
