@@ -65,6 +65,7 @@ def main() -> int:
             {
                 "name": "jezero",
                 "owner": {"name": "Jezero"},
+                "metadata": {"description": description},
                 "plugins": [
                     {"name": "jezero", "source": "./claude-code", "description": description}
                 ],
