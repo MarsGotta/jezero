@@ -8,9 +8,10 @@ the same library.
 |---|---|
 | Claude Code | hooks (session start, first prompt, stop, session end) and the `jezero` skill |
 | Codex | the same hooks and skill (Codex asks you to trust the hooks once, in `/hooks`) |
-| OpenCode | the protocol in the system prompt and upload when a session goes idle |
+| OpenCode | the MCP server, the protocol and related past work in the system prompt, the skill, upload when a session goes idle |
+| Hermes Agent | `jezero_*` tools, related past work on the first turn, the `jezero:jezero` skill, upload as turns end |
 
-All three share one core, `jezero_client.py` (Python 3.9+, standard library only).
+All four share one core, `jezero_client.py` (Python 3.9+, standard library only).
 
 ## What the hooks do
 
@@ -44,6 +45,9 @@ errors only go to `~/.jezero/client.log`.
    Send the printed `jezero device approve ...` line to whoever runs the server. It is a
    SHA-256 fingerprint, not a secret.
 
+   On the computer that runs the Jezero server, add `--no-upload`: its sessions are
+   already read by the connectors, so the plugins there only give context and tools.
+
 3. Once approved, check it and register the MCP server in your agents:
 
    ```bash
@@ -60,7 +64,13 @@ errors only go to `~/.jezero/client.log`.
      `claude plugin install jezero@jezero` (or `/plugin` inside Claude Code).
    - Codex: `codex plugin marketplace add MarsGotta/jezero`, install Jezero from
      `/plugins`, then trust its hooks in `/hooks`.
-   - OpenCode: done by `setup` in step 3 (`~/.config/opencode/plugins/jezero.ts`).
+   - OpenCode: done by `setup` in step 3 (`~/.config/opencode/plugins/jezero.ts` and the
+     skill). Or point OpenCode at the plugin folder, which carries its own core and skill:
+     `"plugin": ["file:///path/to/jezero/plugins/opencode/jezero.ts"]` in `opencode.json`.
+     Agents with their own config folder (`XDG_CONFIG_HOME`) need it there too.
+   - Hermes Agent: `hermes plugins install MarsGotta/jezero/plugins/hermes --enable`, then
+     restart the gateway. The tools appear once step 2 is done; the plugin carries its
+     own copy of the core. Older sessions: `jezero_client.py backfill --agent hermes`.
 
 5. Optional: send the sessions already on this computer.
 
@@ -81,12 +91,14 @@ in (for a worktree, the main repository), or the folder below `projects`, `code`
 ## Server side
 
 `jezero device approve NAME SHA256` adds the device as a client with `upload = true`
-and three disabled connectors that read its inbox (`agent-claude-code-NAME`,
-`agent-codex-NAME`, `agent-opencode-NAME`). Run a pilot (`jezero run --connector ...
+and four disabled connectors that read its inbox (`agent-claude-code-NAME`,
+`agent-codex-NAME`, `agent-opencode-NAME`, `agent-hermes-NAME`). Run a pilot (`jezero run --connector ...
 --sample 3`) before enabling them. Restart `jezero serve` so it accepts the new key.
 
 Uploads land in `<inbox>/<device>/<agent>/...`, mirroring each agent's own store, and
-the usual connectors summarise them. The MCP server stays read-only.
+the usual connectors summarise them. Hermes sessions travel as one JSON export per session
+(`hermes/sessions/<id>.json`), read by the `hermes` connector with `export_dir`. The MCP
+server stays read-only.
 
 ## Development
 

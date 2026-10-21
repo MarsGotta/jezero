@@ -50,6 +50,15 @@
   instructions now tell agents that decisions change and to check `later` before answering
   with a decision, plan or status. Each item summarises one session, so nothing else marks
   a decision as superseded.
+- Hermes Agent plugin (`plugins/hermes`, `hermes plugins install MarsGotta/jezero/plugins/hermes`):
+  `jezero_*` tools, related past work on the first turn, the skill, and upload of the
+  session as turns end. The `hermes` connector reads those uploads with `export_dir`, and
+  takes the project from the session's working folder.
+- OpenCode plugin is a self-contained folder (`plugins/opencode`, with its core, skill and
+  `package.json`): related past work after the first prompt, the skill installed in
+  OpenCode's skills folder.
+- `init --no-upload` for computers that only read Jezero (the server's own computer).
+- Client 0.3.0.
 - Connectors register themselves: each module declares a `CONNECTOR_TYPE` with its
   `build` function and is discovered automatically; other packages can add connectors
   through the `jezero.connectors` entry point group. Adding a connector is one file.

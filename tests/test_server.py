@@ -218,6 +218,7 @@ def test_device_approve_adds_client_and_disabled_connectors(tmp_path) -> None:
         "agent-claude-code-my-laptop",
         "agent-codex-my-laptop",
         "agent-opencode-my-laptop",
+        "agent-hermes-my-laptop",
     }
     assert not any(c.enabled for c in names.values())
     assert (tmp_path / "data" / "inbox" / "my-laptop" / "codex" / "sessions").is_dir()
@@ -245,4 +246,5 @@ def test_device_approve_work_prefix_and_read_only(tmp_path) -> None:
         "work-claude-code-work-mac",
         "work-codex-work-mac",
         "work-opencode-work-mac",
+        "work-hermes-work-mac",
     }

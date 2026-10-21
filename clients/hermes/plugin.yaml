@@ -1,0 +1,19 @@
+name: jezero
+version: 0.0.0
+description: "Jezero: shared read-only memory of past agent work. Search tools, related past work on the first turn, and upload of this computer's Hermes sessions to your Jezero server."
+author: Jezero contributors
+license: Apache-2.0
+homepage: https://github.com/MarsGotta/jezero
+manifest_version: 2
+api_version: 1
+tags: [memory, mcp, sessions]
+provides_tools:
+  - jezero_search
+  - jezero_get_item
+  - jezero_later
+  - jezero_timeline
+  - jezero_list_sources
+provides_hooks:
+  - pre_llm_call
+  - on_session_end
+  - on_session_finalize

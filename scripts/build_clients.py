@@ -5,12 +5,13 @@
     clients/skill/SKILL.md          instructions for agents, shared by every plugin
     clients/claude-code/            Claude Code plugin manifest and hooks
     clients/codex/                  Codex plugin manifest and hooks
-    clients/opencode/jezero.ts      OpenCode plugin
+    clients/opencode/               OpenCode plugin (jezero.ts) and its package.json
+    clients/hermes/                 Hermes Agent plugin (plugin.yaml, __init__.py)
 
 Output:
 
-- dist/client/ (a plugin marketplace for Claude Code and Codex, plus the OpenCode plugin
-  and the core) and dist/jezero-client.tar.gz, which `jezero serve` offers at
+- dist/client/ (a plugin marketplace for Claude Code and Codex, plus the OpenCode and
+  Hermes plugins and the core) and dist/jezero-client.tar.gz, which `jezero serve` offers at
   /client/jezero-client.tar.gz;
 - plugins/ plus .claude-plugin/ and .agents/plugins/ at the repository root, committed,
   so `claude plugin marketplace add OWNER/jezero` and `codex plugin marketplace add
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import filecmp
 import json
+import re
 import shutil
 import sys
 import tarfile
@@ -52,16 +54,19 @@ REPO_FILES = (".claude-plugin/marketplace.json", ".agents/plugins/marketplace.js
 
 
 def plugin(agent: str, target: Path) -> None:
-    shutil.copytree(SRC / agent, target)
+    shutil.copytree(SRC / agent, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     (target / "core").mkdir()
     shutil.copy2(SRC / "core" / "jezero_client.py", target / "core" / "jezero_client.py")
     shutil.copy2(PROJECTS, target / "core" / "jezero_projects.py")
     (target / "skills" / "jezero").mkdir(parents=True)
     shutil.copy2(SRC / "skill" / "SKILL.md", target / "skills" / "jezero" / "SKILL.md")
-    for manifest in target.glob(".*-plugin/plugin.json"):
+    for manifest in [*target.glob(".*-plugin/plugin.json"), *target.glob("package.json")]:
         data = json.loads(manifest.read_text())
         data["version"] = version()
         manifest.write_text(json.dumps(data, indent=2) + "\n")
+    for manifest in target.glob("plugin.yaml"):
+        text = re.sub(r"(?m)^version: .*$", f"version: {version()}", manifest.read_text())
+        manifest.write_text(text)
 
 
 def marketplaces(root: Path, prefix: str) -> None:
@@ -110,10 +115,8 @@ def marketplaces(root: Path, prefix: str) -> None:
 
 
 def plugins(base: Path) -> None:
-    plugin("claude-code", base / "claude-code")
-    plugin("codex", base / "codex")
-    (base / "opencode").mkdir(parents=True)
-    shutil.copy2(SRC / "opencode" / "jezero.ts", base / "opencode" / "jezero.ts")
+    for agent in ("claude-code", "codex", "opencode", "hermes"):
+        plugin(agent, base / agent)
 
 
 GENERATED_NOTE = """\

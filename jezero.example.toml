@@ -72,6 +72,7 @@ type = "hermes"
 interval_minutes = 15
 [connectors.options]
 state_db = "/path/to/hermes/profile/state.db"
+# export_dir = "..."         # instead of state_db: Hermes sessions uploaded by a device
 skip_session_sources = ["cron", "subagent"]
 settle_minutes = 30          # wait until a session has been quiet this long
 include_tool_calls = true    # one short line per tool call; tool results are skipped

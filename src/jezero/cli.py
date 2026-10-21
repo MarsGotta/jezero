@@ -292,6 +292,7 @@ def cmd_device_approve(config: Config, args: argparse.Namespace) -> int:
         "claude-code": ("claude_code", "projects_dir", inbox / "claude-code" / "projects"),
         "codex": ("codex", "sessions_dir", inbox / "codex" / "sessions"),
         "opencode": ("opencode", "export_dir", inbox / "opencode" / "sessions"),
+        "hermes": ("hermes", "export_dir", inbox / "hermes" / "sessions"),
     }
     for agent, (ctype, option, folder) in ({} if args.read_only else stores).items():
         folder.mkdir(parents=True, exist_ok=True)

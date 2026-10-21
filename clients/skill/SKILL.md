@@ -6,10 +6,14 @@ description: Use when work may have been done before, when the user mentions a p
 # Jezero: shared memory of past work
 
 Jezero is a read-only library of past work by all of this user's agents (Claude Code,
-Codex, OpenCode, other assistants) and their project tasks. Each item is a summary of one
+Codex, OpenCode, Hermes, other assistants) and their project tasks. Each item is a summary of one
 session or task with "atoms": decisions, rationale, fixes, exact errors, commands, facts
 and risks, plus the real date it happened. Sessions are ingested automatically; agents
 never need to save anything.
+
+Tool names: the `jezero` MCP server exposes `search`, `get_item`, `later`, `timeline` and
+`list_sources`; in Hermes Agent the same tools are `jezero_search`, `jezero_get_item`,
+`jezero_later`, `jezero_timeline` and `jezero_list_sources`.
 
 ## When to search (without being asked)
 

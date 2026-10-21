@@ -1,7 +1,7 @@
 {
   "name": "jezero",
   "displayName": "Jezero",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Jezero: shared read-only memory of past agent work. Brings related past sessions into context and sends this computer's sessions to your Jezero server.",
   "license": "Apache-2.0",
   "author": {

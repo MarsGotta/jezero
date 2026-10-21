@@ -1,0 +1,26 @@
+{
+  "name": "opencode-jezero",
+  "version": "0.3.0",
+  "description": "Jezero for OpenCode: shared read-only memory of past agent work. Registers the Jezero MCP server, brings related past work into context and sends this computer's sessions to your Jezero server.",
+  "type": "module",
+  "main": "jezero.ts",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/MarsGotta/jezero",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MarsGotta/jezero.git",
+    "directory": "plugins/opencode"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "mcp",
+    "memory",
+    "agents"
+  ],
+  "files": [
+    "jezero.ts",
+    "core/",
+    "skills/"
+  ]
+}

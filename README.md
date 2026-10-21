@@ -124,8 +124,8 @@ allows (glob patterns), so a coding agent does not have to see your mail.
 
 ## Other computers: plugins
 
-Sessions on other computers reach Jezero through plugins for Claude Code, Codex and
-OpenCode, which also make agents use Jezero by habit (a short protocol and recent project
+Sessions on other computers reach Jezero through plugins for Claude Code, Codex, OpenCode
+and Hermes Agent, which also make agents use Jezero by habit (a short protocol and recent project
 work at session start, related past work on the first prompt). No SSH needed: each
 computer creates its own key, the server approves its fingerprint, and sessions are
 uploaded when they end. See [clients/README.md](clients/README.md).
@@ -135,7 +135,10 @@ The plugins install straight from this repository:
 ```bash
 claude plugin marketplace add MarsGotta/jezero && claude plugin install jezero@jezero
 codex plugin marketplace add MarsGotta/jezero    # then install Jezero from /plugins
+hermes plugins install MarsGotta/jezero/plugins/hermes --enable
 ```
+
+OpenCode loads the folder `plugins/opencode` (or `setup` installs it for you).
 
 They stay quiet until the computer is connected to your server with
 `jezero_client.py init` (step 2 in the clients guide).

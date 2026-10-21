@@ -132,7 +132,7 @@ box(
     74,
     "dev",
     "Laptops and desktops",
-    ("Claude Code, Codex, OpenCode", "with the Jezero plugin"),
+    ("Claude Code, Codex, OpenCode, Hermes", "with the Jezero plugin"),
 )
 box(34, 594, 287, 50, "dev", "Email", ("planned · stored as external",), dashed=True)
 box(34, 654, 287, 50, "dev", "Antigravity, Cursor", ("planned · a folder watcher",), dashed=True)
@@ -286,7 +286,7 @@ box(
     (
         "jezero_client.py: hooks, upload queue, device key, MCP setup. Python 3.9+, standard library only.",
         "jezero_projects.py: how a folder becomes a project. The SAME file the server uses.",
-        "Thin adapters: Claude Code and Codex share their hooks · OpenCode gets a small TypeScript plugin.",
+        "Thin adapters: Claude Code and Codex share their hooks · OpenCode (TypeScript) and Hermes (Python) plugins.",
     ),
 )
 text(1068, 870, "dashed arrows: periodic", "#666", 11)
