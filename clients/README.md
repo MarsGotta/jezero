@@ -16,7 +16,7 @@ All three share one core, `jezero_client.py` (Python 3.9+, standard library only
 
 - **Session start**: adds a short protocol (search Jezero before non-trivial work, check
   `later` before relying on a decision, cite ids, never guess) and the five most recent
-  items of the current project (taken from the working directory, `.../projects/<name>`).
+  items of the current project (see [Projects](#projects)).
 - **First prompt of a session**: searches Jezero with the prompt and adds up to three
   related items, if any match well.
 - **Stop / session end**: queues the transcript and uploads it in a detached process.
@@ -52,12 +52,14 @@ errors only go to `~/.jezero/client.log`.
        --opencode-plugin ~/.jezero-src/jezero-client/opencode/jezero.ts
    ```
 
-4. Install the plugins:
+4. Install the plugins, from GitHub (updates arrive with `marketplace update`) or from
+   the bundle you unpacked in step 1 (use `~/.jezero-src/jezero-client` instead of
+   `MarsGotta/jezero`; handy for a server that runs its own changes):
 
-   - Claude Code: `claude plugin marketplace add ~/.jezero-src/jezero-client` and then
+   - Claude Code: `claude plugin marketplace add MarsGotta/jezero` and then
      `claude plugin install jezero@jezero` (or `/plugin` inside Claude Code).
-   - Codex: `codex plugin marketplace add ~/.jezero-src/jezero-client`, install Jezero
-     from `/plugins`, then trust its hooks in `/hooks`.
+   - Codex: `codex plugin marketplace add MarsGotta/jezero`, install Jezero from
+     `/plugins`, then trust its hooks in `/hooks`.
    - OpenCode: done by `setup` in step 3 (`~/.config/opencode/plugins/jezero.ts`).
 
 5. Optional: send the sessions already on this computer.
@@ -89,4 +91,10 @@ the usual connectors summarise them. The MCP server stays read-only.
 ## Development
 
 Edit `clients/`, then run `python3 scripts/build_clients.py`; it copies the core and the
-skill into every plugin, so there is a single source for both.
+skill into every plugin, so there is a single source for both. It writes the server
+bundle (`dist/`, not committed) and the installable copy at the repository root
+(`plugins/`, `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`),
+which is committed so the plugins install from GitHub. Never edit `plugins/` by hand:
+CI runs `python3 scripts/build_clients.py --check` and fails if it differs from
+`clients/`. Bump `VERSION` in the core for any change, because Claude Code and Codex
+cache plugins by version.

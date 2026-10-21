@@ -130,6 +130,16 @@ work at session start, related past work on the first prompt). No SSH needed: ea
 computer creates its own key, the server approves its fingerprint, and sessions are
 uploaded when they end. See [clients/README.md](clients/README.md).
 
+The plugins install straight from this repository:
+
+```bash
+claude plugin marketplace add MarsGotta/jezero && claude plugin install jezero@jezero
+codex plugin marketplace add MarsGotta/jezero    # then install Jezero from /plugins
+```
+
+They stay quiet until the computer is connected to your server with
+`jezero_client.py init` (step 2 in the clients guide).
+
 ## Configuration
 
 Everything lives in one TOML file: storage, search tuning, summarizer endpoint, server

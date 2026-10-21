@@ -1,0 +1,16 @@
+{
+  "name": "jezero",
+  "owner": {
+    "name": "Jezero"
+  },
+  "metadata": {
+    "description": "Shared read-only memory of past agent work."
+  },
+  "plugins": [
+    {
+      "name": "jezero",
+      "source": "./plugins/claude-code",
+      "description": "Shared read-only memory of past agent work."
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "jezero",
+  "interface": {
+    "displayName": "Jezero"
+  },
+  "plugins": [
+    {
+      "name": "jezero",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Jezero"
+      }
+    }
+  ]
+}
