@@ -42,7 +42,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 AGENT_HOME_VARS = ("CLAUDE_CONFIG_DIR", "CODEX_HOME")
 
 

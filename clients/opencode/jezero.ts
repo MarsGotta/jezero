@@ -24,15 +24,22 @@ const INSTALLED_CORE = "__JEZERO_CORE__"
 const CORE =
   process.env.JEZERO_CORE ??
   (INSTALLED_CORE.includes("JEZERO_CORE") ? join(HERE, "core", "jezero_client.py") : INSTALLED_CORE)
-const HOME = process.env.JEZERO_CLIENT_HOME ?? join(homedir(), ".jezero")
-const EXPORTS = join(HOME, "spool", "opencode")
 const CONFIG_DIR = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "opencode")
+// Like the core: JEZERO_CLIENT_HOME, else a key kept in OpenCode's own config folder
+// (sandboxed agents that cannot see the user's home), else ~/.jezero.
+const AGENT_HOME = join(CONFIG_DIR, "jezero")
+const HOME =
+  process.env.JEZERO_CLIENT_HOME ??
+  (existsSync(join(AGENT_HOME, "client.json")) ? AGENT_HOME : join(homedir(), ".jezero"))
+const CORE_ENV = { ...process.env, JEZERO_CLIENT_HOME: HOME }
+const EXPORTS = join(HOME, "spool", "opencode")
 
 function core(args: string[], input: object): string {
   const run = spawnSync("python3", [CORE, ...args], {
     input: JSON.stringify(input),
     encoding: "utf8",
     timeout: 5000,
+    env: CORE_ENV,
   })
   return run.status === 0 ? (run.stdout ?? "") : ""
 }
@@ -125,6 +132,7 @@ export const Jezero: Plugin = async ({ client, directory }) => {
         const child = spawn("python3", [CORE, "hook", "session-end", "--agent", "opencode"], {
           detached: true,
           stdio: ["pipe", "ignore", "ignore"],
+          env: CORE_ENV,
         })
         child.stdin?.end(JSON.stringify({ session_id: id, transcript_path: file, cwd: directory }))
         child.unref()

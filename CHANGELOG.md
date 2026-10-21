@@ -59,6 +59,7 @@
   OpenCode's skills folder.
 - `init --no-upload` for computers that only read Jezero (the server's own computer).
 - Client 0.3.1: `status` on a read-only computer checks reading, not uploading.
+- Client 0.3.3: the OpenCode plugin also finds a key in `<OpenCode config>/jezero`.
 - Client 0.3.2: sandboxed agents keep their own key in `<agent config>/jezero`
   (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), used when `JEZERO_CLIENT_HOME` is not set.
 - `since`/`until` accept a bare date or a datetime without offset (read as UTC).
