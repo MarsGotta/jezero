@@ -372,8 +372,8 @@ def upload(cfg: dict[str, Any], agent: str, path: Path) -> bool:
     if status == 200:
         return True
     log(f"upload {agent} {relpath}: HTTP {status} {raw[:200]!r}")
-    if status in (400, 413, 415):
-        return True  # the server will never accept this file: drop it
+    if status in (400, 403, 413, 415):
+        return True  # the server will never accept this file (or uploads are off): drop it
     raise RuntimeError(f"HTTP {status}")
 
 

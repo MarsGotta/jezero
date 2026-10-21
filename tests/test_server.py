@@ -223,3 +223,26 @@ def test_device_approve_adds_client_and_disabled_connectors(tmp_path) -> None:
     assert (tmp_path / "data" / "inbox" / "my-laptop" / "codex" / "sessions").is_dir()
     assert cli_main(["-c", str(cfg), "device", "approve", "my-laptop", digest]) == 1
     assert cli_main(["-c", str(cfg), "device", "approve", "x", "nothex"]) == 2
+
+
+def test_device_approve_work_prefix_and_read_only(tmp_path) -> None:
+    from jezero.cli import main as cli_main
+    from jezero.config import load_config
+
+    cfg = tmp_path / "jezero.toml"
+    cfg.write_text('[storage]\npath = "lib.db"\n')
+    d1, d2 = hashlib.sha256(b"a").hexdigest(), hashlib.sha256(b"b").hexdigest()
+    assert (
+        cli_main(["-c", str(cfg), "device", "approve", "work-mac", d1, "--source-prefix", "work"])
+        == 0
+    )
+    assert cli_main(["-c", str(cfg), "device", "approve", "viewer", d2, "--read-only"]) == 0
+    config = load_config(cfg)
+    work, viewer = config.clients
+    assert work.sources == ["agent-*", "work-*-work-mac"] and work.upload
+    assert viewer.sources == ["agent-*"] and not viewer.upload
+    assert {c.name for c in config.connectors} == {
+        "work-claude-code-work-mac",
+        "work-codex-work-mac",
+        "work-opencode-work-mac",
+    }

@@ -237,6 +237,7 @@ def cmd_resummarize(config: Config, args: argparse.Namespace) -> int:
 
 def cmd_device_approve(config: Config, args: argparse.Namespace) -> int:
     """Register a device key (its SHA-256 digest) and its inbox connectors (disabled)."""
+    import fnmatch
     import re
 
     name, digest = args.name, args.digest.removeprefix("sha256:").lower()
@@ -253,7 +254,15 @@ def cmd_device_approve(config: Config, args: argparse.Namespace) -> int:
         print("error: no config file to write to", file=sys.stderr)
         return 1
     inbox = config.inbox_dir / name
-    sources = ", ".join(json.dumps(s) for s in args.sources)
+    prefix = args.source_prefix
+    if not re.fullmatch(r"[a-z][a-z0-9]{0,15}", prefix):
+        print("error: --source-prefix must be a short lowercase word", file=sys.stderr)
+        return 2
+    readable = list(args.sources)
+    own = f"{prefix}-*-{name}"
+    if not args.read_only and not any(fnmatch.fnmatch(own, s) for s in readable):
+        readable.append(own)  # a device always sees its own sessions
+    sources = ", ".join(json.dumps(s) for s in readable)
     block = [
         "",
         "[[clients]]",
@@ -261,20 +270,20 @@ def cmd_device_approve(config: Config, args: argparse.Namespace) -> int:
         f'name = "{name}"',
         f'token_sha256 = "{digest}"',
         f"sources = [{sources}]",
-        "upload = true",
+        f"upload = {'false' if args.read_only else 'true'}",
     ]
     stores = {
         "claude-code": ("claude_code", "projects_dir", inbox / "claude-code" / "projects"),
         "codex": ("codex", "sessions_dir", inbox / "codex" / "sessions"),
         "opencode": ("opencode", "export_dir", inbox / "opencode" / "sessions"),
     }
-    for agent, (ctype, option, folder) in stores.items():
+    for agent, (ctype, option, folder) in ({} if args.read_only else stores).items():
         folder.mkdir(parents=True, exist_ok=True)
         block += [
             "",
             "[[connectors]]",
             f"# Sessions uploaded by {name}. Disabled until the pilot passes.",
-            f'name = "agent-{agent}-{name}"',
+            f'name = "{prefix}-{agent}-{name}"',
             f'type = "{ctype}"',
             "enabled = false",
             "interval_minutes = 15",
@@ -365,6 +374,12 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("name")
     d.add_argument("digest", help="sha256 of the device key, as printed by the client")
     d.add_argument("--sources", nargs="+", default=["agent-*"], help="what it may read")
+    d.add_argument(
+        "--source-prefix",
+        default="agent",
+        help="prefix of its sources; anything but 'agent' keeps them out of agent-* readers",
+    )
+    d.add_argument("--read-only", action="store_true", help="it may read but not upload")
     d.set_defaults(fn=cmd_device_approve)
 
     p = sub.add_parser("resummarize", help="summarise stored items again from their original")
