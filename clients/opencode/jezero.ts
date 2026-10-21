@@ -1,6 +1,7 @@
 /**
  * Jezero plugin for OpenCode: a thin adapter over the shared Python core.
  *
+ * - Registers the Jezero MCP server (from ~/.jezero/client.json and its key file).
  * - Adds the Jezero protocol and recent work of the project to the system prompt.
  * - When a session goes idle, exports it through the SDK and lets the core upload it.
  *
@@ -8,7 +9,7 @@
  */
 import type { Plugin } from "@opencode-ai/plugin"
 import { spawn, spawnSync } from "node:child_process"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -25,10 +26,34 @@ function core(args: string[], input: object): string {
   return run.status === 0 ? (run.stdout ?? "") : ""
 }
 
+function clientConfig(): { url: string; token: string } | null {
+  try {
+    const cfg = JSON.parse(readFileSync(join(HOME, "client.json"), "utf8"))
+    const token = readFileSync(join(HOME, "token"), "utf8").trim()
+    return cfg.url && token ? { url: String(cfg.url).replace(/\/+$/, ""), token } : null
+  } catch {
+    return null
+  }
+}
+
 export const Jezero: Plugin = async ({ client, directory }) => {
   const contextBySession = new Map<string, string>()
 
   return {
+    // Register the Jezero MCP server, unless the user already configured one by hand.
+    config: async (cfg: any) => {
+      const jezero = clientConfig()
+      if (!jezero) return
+      cfg.mcp = cfg.mcp ?? {}
+      if (cfg.mcp.jezero) return
+      cfg.mcp.jezero = {
+        type: "remote",
+        url: `${jezero.url}/mcp`,
+        enabled: true,
+        headers: { Authorization: `Bearer ${jezero.token}` },
+      }
+    },
+
     "experimental.chat.system.transform": async (input: any, output: any) => {
       const id = String(input?.sessionID ?? "")
       if (!contextBySession.has(id)) {

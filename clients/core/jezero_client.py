@@ -27,6 +27,7 @@ import os
 import re
 import secrets
 import shutil
+import ssl
 import subprocess
 import sys
 import time
@@ -42,6 +43,7 @@ TOKEN_FILE = HOME / "token"
 SPOOL = HOME / "spool"
 STATE = HOME / "state.json"
 LOG = HOME / "client.log"
+CA_FILE = HOME / "ca.pem"
 AGENTS = ("claude-code", "codex", "opencode")
 
 HOOK_TIMEOUT = float(os.environ.get("JEZERO_HOOK_TIMEOUT", "2.5"))
@@ -127,11 +129,63 @@ def _http(
     request.add_header("User-Agent", f"jezero-client/{VERSION}")
     for key, value in (headers or {}).items():
         request.add_header(key, value)
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.status, response.read()
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.read()
+    for attempt in (1, 2):
+        try:
+            with urllib.request.urlopen(
+                request, timeout=timeout, context=_ssl_context()
+            ) as response:
+                return response.status, response.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read()
+        except urllib.error.URLError as exc:
+            if attempt == 1 and _is_cert_error(exc) and export_system_roots():
+                continue
+            raise
+    raise AssertionError("unreachable")
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """Default trust, or the system roots exported by `export_system_roots`."""
+    cafile = os.environ.get("JEZERO_CA_FILE") or (str(CA_FILE) if CA_FILE.is_file() else None)
+    return ssl.create_default_context(cafile=cafile)
+
+
+def _is_cert_error(exc: urllib.error.URLError) -> bool:
+    reason = getattr(exc, "reason", None)
+    return isinstance(reason, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(
+        exc
+    )
+
+
+def export_system_roots() -> bool:
+    """macOS: Python may not trust the system's certificates (python.org builds ship none,
+    and company networks add their own root to the keychain). Export the keychains' roots
+    to ~/.jezero/ca.pem once and use them from then on. False if nothing changed."""
+    if sys.platform != "darwin" or CA_FILE.is_file() or os.environ.get("JEZERO_CA_FILE"):
+        return False
+    keychains = [
+        "/System/Library/Keychains/SystemRootCertificates.keychain",
+        "/Library/Keychains/System.keychain",
+        str(Path("~/Library/Keychains/login.keychain-db").expanduser()),
+    ]
+    pems = []
+    for keychain in keychains:
+        if not Path(keychain).exists():
+            continue
+        result = subprocess.run(
+            ["/usr/bin/security", "find-certificate", "-a", "-p", keychain],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if result.returncode == 0:
+            pems.append(result.stdout)
+    bundle = "".join(pems)
+    if "BEGIN CERTIFICATE" not in bundle:
+        return False
+    _write_private(CA_FILE, bundle)
+    log(f"exported system certificates to {CA_FILE}")
+    return True
 
 
 def mcp_call(cfg: dict[str, Any], tool: str, args: dict[str, Any], timeout: float) -> Any:
@@ -578,43 +632,20 @@ def _setup_codex(cfg: dict[str, Any]) -> str:
     return "codex: MCP added to config.toml"
 
 
-def _setup_opencode(cfg: dict[str, Any], plugin_source: Path | None) -> str:
+def _setup_opencode(plugin_source: Path | None) -> str:
+    """The OpenCode plugin registers the MCP server itself (its `config` hook), so the
+    user's opencode.json / opencode.jsonc is never edited."""
     base = Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser() / "opencode"
     if not base.exists() and not shutil.which("opencode"):
         return "opencode: not found, skipped"
-    notes = []
-    path = base / "opencode.json"
-    if (base / "opencode.jsonc").exists() and not path.exists():
-        notes.append("opencode.jsonc found: add the MCP server by hand (see README)")
-    else:
-        data = (
-            _load_json(path, {})
-            if path.exists()
-            else {"$schema": "https://opencode.ai/config.json"}
-        )
-        if not isinstance(data, dict):
-            return "opencode: opencode.json is not an object, skipped"
-        servers = data.setdefault("mcp", {})
-        if "jezero" in servers:
-            notes.append("MCP server jezero already configured")
-        else:
-            servers["jezero"] = {
-                "type": "remote",
-                "url": cfg["url"].rstrip("/") + "/mcp",
-                "enabled": True,
-                "headers": {"Authorization": "Bearer {file:" + str(TOKEN_FILE) + "}"},
-            }
-            base.mkdir(parents=True, exist_ok=True)
-            _save_json(path, data)
-            notes.append("MCP added to opencode.json")
-    if plugin_source and plugin_source.exists():
-        core = _installed_core()
-        target = base / "plugins" / "jezero.ts"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        text = plugin_source.read_text(encoding="utf-8").replace("__JEZERO_CORE__", str(core))
-        target.write_text(text, encoding="utf-8")
-        notes.append(f"plugin installed in {target}")
-    return "opencode: " + "; ".join(notes)
+    if not plugin_source or not plugin_source.exists():
+        return "opencode: pass --opencode-plugin PATH/jezero.ts to install the plugin"
+    core = _installed_core()
+    target = base / "plugins" / "jezero.ts"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    text = plugin_source.read_text(encoding="utf-8").replace("__JEZERO_CORE__", str(core))
+    target.write_text(text, encoding="utf-8")
+    return f"opencode: plugin (with the MCP server) installed in {target}"
 
 
 def setup(agents: list[str], opencode_plugin: str | None) -> int:
@@ -629,7 +660,7 @@ def setup(agents: list[str], opencode_plugin: str | None) -> int:
             print(_setup_codex(cfg))
         elif agent == "opencode":
             source = Path(opencode_plugin) if opencode_plugin else None
-            print(_setup_opencode(cfg, source))
+            print(_setup_opencode(source))
     return 0
 
 

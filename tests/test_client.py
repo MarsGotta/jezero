@@ -153,3 +153,43 @@ def test_offline_keeps_the_queue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert len(list((core.SPOOL / "pending").glob("*.json"))) == 1
     # A failing server or a hook error never raises into the agent.
     assert core.hook("session-start", "codex", {"cwd": "/w/projects/demo"}) == core.PROTOCOL
+
+
+def test_certificate_failure_exports_system_roots_and_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import ssl
+    import urllib.error
+
+    core = load_core(tmp_path / "home", monkeypatch)
+    calls: list[object] = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"{}"
+
+    def fake_urlopen(request, timeout, context):  # noqa: ANN001
+        calls.append(context)
+        if len(calls) == 1:
+            raise urllib.error.URLError(ssl.SSLCertVerificationError("unable to get issuer"))
+        return Response()
+
+    exported: list[bool] = []
+    monkeypatch.setattr(core.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(core, "export_system_roots", lambda: exported.append(True) or True)
+    assert core._http("GET", "https://lib.example/inbox/v1/ping", "t") == (200, b"{}")
+    assert len(calls) == 2 and exported == [True]
+
+    monkeypatch.setattr(core, "export_system_roots", lambda: False)
+    calls.clear()
+    with pytest.raises(urllib.error.URLError):
+        core._http("GET", "https://lib.example/inbox/v1/ping", "t")
+    assert len(calls) == 1
