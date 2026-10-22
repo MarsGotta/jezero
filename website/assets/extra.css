@@ -1,0 +1,245 @@
+/* Jezero's colours, the same as the terminal app: rust, ochre and sand on warm black,
+   with the turquoise of the delta. "night" is the dark scheme, "dawn" the light one. */
+
+[data-md-color-scheme="slate"] {
+  --md-hue: 20;
+  --md-default-bg-color: #120d0b;
+  --md-default-fg-color: #efe3d3;
+  --md-default-fg-color--light: #c9b8a6;
+  --md-default-fg-color--lighter: #9c8b7c;
+  --md-default-fg-color--lightest: #4a3b32;
+  --md-primary-fg-color: #19120f;
+  --md-primary-bg-color: #efe3d3;
+  --md-accent-fg-color: #3fc9b7;
+  --md-typeset-a-color: #ee8a45;
+  --md-code-bg-color: #1e1511;
+  --md-code-fg-color: #efe3d3;
+  --md-footer-bg-color: #19120f;
+  --md-footer-bg-color--dark: #120d0b;
+  --jz-rust: #d9572b;
+  --jz-ochre: #ee8a45;
+  --jz-sand: #f2c46d;
+  --jz-teal: #3fc9b7;
+  --jz-panel: #221813;
+  --jz-line: #3a2c24;
+  --md-accent-fg-color--transparent: rgba(238, 138, 69, 0.1);
+  --md-code-hl-keyword-color: #3fc9b7;
+  --md-code-hl-string-color: #f2c46d;
+  --md-code-hl-number-color: #ee8a45;
+  --md-code-hl-constant-color: #ee8a45;
+  --md-code-hl-function-color: #ee8a45;
+  --md-code-hl-special-color: #d9572b;
+  --md-code-hl-comment-color: #9c8b7c;
+  --md-code-hl-name-color: #efe3d3;
+  --md-code-hl-variable-color: #efe3d3;
+  --md-code-hl-operator-color: #c9b8a6;
+  --md-code-hl-punctuation-color: #c9b8a6;
+  --md-code-hl-generic-color: #c9b8a6;
+  --md-mermaid-node-bg-color: #221813;
+  --md-mermaid-node-fg-color: #efe3d3;
+  --md-mermaid-edge-color: #ee8a45;
+  --md-mermaid-label-bg-color: #120d0b;
+  --md-mermaid-label-fg-color: #efe3d3;
+  --md-mermaid-sequence-actor-bg-color: #221813;
+  --md-mermaid-sequence-actor-border-color: #ee8a45;
+  --md-mermaid-sequence-actor-fg-color: #efe3d3;
+  --md-mermaid-sequence-actor-line-color: #4a3b32;
+  --md-mermaid-sequence-message-line-color: #ee8a45;
+  --md-mermaid-sequence-message-fg-color: #efe3d3;
+  --md-mermaid-sequence-note-bg-color: #19120f;
+  --md-mermaid-sequence-note-border-color: #3fc9b7;
+  --md-mermaid-sequence-note-fg-color: #efe3d3;
+  --md-mermaid-sequence-number-bg-color: #3fc9b7;
+  --md-mermaid-sequence-number-fg-color: #120d0b;
+  --md-mermaid-sequence-loop-border-color: #4a3b32;
+  --md-mermaid-sequence-box-bg-color: #19120f;
+}
+
+[data-md-color-scheme="default"] {
+  --md-default-bg-color: #fbf6ef;
+  --md-default-fg-color: #2b1d16;
+  --md-default-fg-color--light: #5c4637;
+  --md-default-fg-color--lighter: #7a6556;
+  --md-default-fg-color--lightest: #cdbba6;
+  --md-primary-fg-color: #f0e6d8;
+  --md-primary-bg-color: #2b1d16;
+  --md-accent-fg-color: #127e71;
+  --md-typeset-a-color: #b9461b;
+  --md-code-bg-color: #f0e6d8;
+  --md-code-fg-color: #2b1d16;
+  --md-footer-bg-color: #2b1d16;
+  --md-footer-bg-color--dark: #1f1510;
+  --jz-rust: #b9461b;
+  --jz-ochre: #c9662a;
+  --jz-sand: #9c6f12;
+  --jz-teal: #127e71;
+  --jz-panel: #f0e6d8;
+  --jz-line: #e2d3bf;
+  --md-accent-fg-color--transparent: rgba(185, 70, 27, 0.08);
+  --md-code-hl-keyword-color: #127e71;
+  --md-code-hl-string-color: #8a5f0c;
+  --md-code-hl-number-color: #b9461b;
+  --md-code-hl-constant-color: #b9461b;
+  --md-code-hl-function-color: #b9461b;
+  --md-code-hl-special-color: #b9461b;
+  --md-code-hl-comment-color: #7a6556;
+  --md-mermaid-node-bg-color: #f0e6d8;
+  --md-mermaid-node-fg-color: #2b1d16;
+  --md-mermaid-edge-color: #b9461b;
+  --md-mermaid-label-bg-color: #fbf6ef;
+  --md-mermaid-label-fg-color: #2b1d16;
+  --md-mermaid-sequence-actor-bg-color: #f0e6d8;
+  --md-mermaid-sequence-actor-border-color: #b9461b;
+  --md-mermaid-sequence-actor-line-color: #cdbba6;
+  --md-mermaid-sequence-message-line-color: #b9461b;
+  --md-mermaid-sequence-note-bg-color: #fbf6ef;
+  --md-mermaid-sequence-note-border-color: #127e71;
+  --md-mermaid-sequence-number-bg-color: #127e71;
+  --md-mermaid-sequence-number-fg-color: #fbf6ef;
+}
+
+/* Header and tabs: a quiet bar, the colour comes from the logo and the active tab. */
+.md-header,
+.md-tabs {
+  background-color: var(--md-primary-fg-color);
+  color: var(--md-primary-bg-color);
+  box-shadow: none;
+  border-bottom: 1px solid var(--jz-line);
+}
+.md-tabs__link--active,
+.md-tabs__item--active .md-tabs__link {
+  color: var(--jz-ochre);
+}
+.md-header__button.md-logo img {
+  height: 1.6rem;
+}
+.md-header__topic:first-child {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.md-typeset h1 {
+  font-weight: 700;
+  color: var(--md-default-fg-color);
+}
+.md-typeset h2 {
+  font-weight: 650;
+}
+.md-typeset a:hover {
+  color: var(--jz-teal);
+}
+.md-nav__link--active,
+.md-nav__item .md-nav__link--active {
+  color: var(--jz-ochre) !important;
+  background: var(--md-accent-fg-color--transparent);
+}
+.md-typeset code {
+  border-radius: 4px;
+}
+.md-typeset table:not([class]) th {
+  background: var(--jz-panel);
+}
+
+/* "You should see:" output blocks read as terminal output. */
+.md-typeset pre > code {
+  border-left: 2px solid var(--jz-line);
+}
+
+/* Home page hero. */
+.jz-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 2.4rem;
+  align-items: center;
+  margin: 0.6rem 0 2.2rem;
+}
+.jz-hero h1 .headerlink {
+  display: none;
+}
+.jz-hero h1 {
+  margin: 0 0 0.6rem;
+  font-size: 3.4rem;
+  font-weight: 800;
+  line-height: 1.1;
+  background: linear-gradient(90deg, var(--jz-rust), var(--jz-ochre) 45%, var(--jz-sand) 75%, var(--jz-teal));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.jz-hero .jz-tagline {
+  font-size: 1.05rem;
+  color: var(--md-default-fg-color--light);
+  margin: 0 0 1.2rem;
+}
+.jz-hero .md-button {
+  margin: 0 0.4rem 0.6rem 0;
+}
+.jz-hero .md-button--primary {
+  background-color: var(--jz-ochre);
+  border-color: var(--jz-ochre);
+  color: #1c120e;
+}
+.jz-hero .md-button--primary:hover {
+  background-color: var(--jz-teal);
+  border-color: var(--jz-teal);
+}
+.jz-hero .md-button:not(.md-button--primary) {
+  color: var(--jz-ochre);
+  border-color: var(--jz-ochre);
+}
+.jz-hero img {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--jz-line);
+  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.6);
+}
+@media (max-width: 960px) {
+  .jz-hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* The four ways in: cards on the home page, four across on wide screens. */
+@media (min-width: 1220px) {
+  .md-typeset .grid.cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@media (min-width: 600px) and (max-width: 1219px) {
+  .md-typeset .grid.cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.md-typeset .grid.cards > ul > li {
+  border-color: var(--jz-line);
+  background: var(--jz-panel);
+}
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--jz-ochre);
+}
+
+/* Callouts that Zensical has no style for. */
+.md-typeset .admonition.important,
+.md-typeset details.important {
+  border-color: var(--jz-teal);
+}
+.md-typeset .important > .admonition-title,
+.md-typeset .important > summary {
+  background-color: color-mix(in srgb, var(--jz-teal) 12%, transparent);
+}
+.md-typeset .important > .admonition-title::before,
+.md-typeset .important > summary::before {
+  background-color: var(--jz-teal);
+}
+.md-typeset .admonition.caution,
+.md-typeset details.caution {
+  border-color: var(--jz-rust);
+}
+.md-typeset .caution > .admonition-title,
+.md-typeset .caution > summary {
+  background-color: color-mix(in srgb, var(--jz-rust) 12%, transparent);
+}
+.md-typeset .caution > .admonition-title::before,
+.md-typeset .caution > summary::before {
+  background-color: var(--jz-rust);
+}

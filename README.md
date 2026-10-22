@@ -18,7 +18,7 @@ agent you run over [MCP](https://modelcontextprotocol.io).
        alt="Sessions from agents on the server and from other computers go through connectors, redaction and a summariser into one SQLite library, which agents query over a read-only MCP server.">
 </p>
 
-**[Documentation](docs/README.md)** ·
+**[Documentation](https://jezero.marsgotta.com)** ·
 [Tutorial](docs/getting-started/tutorial.md) ·
 [Connect an agent](docs/how-to/connect-agents.md) ·
 [Reference](docs/reference/cli.md) ·
@@ -125,6 +125,9 @@ jezero ui --demo        # look around with made-up data
 More in [Use the Jezero app](docs/how-to/app.md).
 
 ## Documentation
+
+Read it at **[jezero.marsgotta.com](https://jezero.marsgotta.com)**, or right here on
+GitHub in [`docs/`](docs/README.md):
 
 | | |
 |---|---|

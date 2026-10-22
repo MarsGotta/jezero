@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Jezero">
+  <defs>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F2C46D"/>
+      <stop offset="0.5" stop-color="#EE8A45"/>
+      <stop offset="1" stop-color="#D9572B"/>
+    </linearGradient>
+    <radialGradient id="basin" cx="0.55" cy="0.55" r="0.6">
+      <stop offset="0" stop-color="#3A2219"/>
+      <stop offset="1" stop-color="#1C120E"/>
+    </radialGradient>
+  </defs>
+  <circle cx="32" cy="32" r="29" fill="url(#rim)"/>
+  <circle cx="33.5" cy="33.5" r="22" fill="url(#basin)"/>
+  <path d="M11.5 27 C17 26 21 28.5 24 32 C21 33 19.5 36 19 40 C16 37 13 33.5 11.5 27 Z" fill="#3FC9B7"/>
+  <path d="M11.5 27 C15.5 29 18.5 31 21.5 31.5" stroke="#127E71" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+  <path d="M14 31.5 C16 34 17.5 35.5 19.6 36.3" stroke="#127E71" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+  <circle cx="40" cy="38" r="2.2" fill="#EE8A45" opacity="0.85"/>
+  <circle cx="33" cy="44.5" r="1.4" fill="#F2C46D" opacity="0.7"/>
+  <circle cx="44" cy="29" r="1.2" fill="#F2C46D" opacity="0.6"/>
+</svg>

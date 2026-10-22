@@ -7,7 +7,7 @@ the same subject, and how the plugins decide that past work is related to a firs
 ## The short version
 
 ```mermaid
-flowchart LR
+flowchart TD
   Q["query text"] --> T["terms: words and quoted phrases,<br/>3+ characters, each quoted"]
   T --> M["FTS5 MATCH, terms OR-ed<br/>+ allowed sources, project, since"]
   M --> P["best candidate_pool rows by BM25<br/>(200 by default)"]

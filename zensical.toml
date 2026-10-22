@@ -1,0 +1,128 @@
+# The documentation website. Build it with `uv run --group docs python scripts/build_site.py`,
+# which stages docs/ into build/site-src first (see that script for why).
+[project]
+site_name = "Jezero"
+site_url = "https://jezero.marsgotta.com/"
+site_description = "A shared, searchable library of your agents' past work, served read-only over MCP."
+site_author = "Marcela Gotta"
+copyright = "Copyright &copy; Marcela Gotta. Apache-2.0."
+repo_url = "https://github.com/MarsGotta/jezero"
+repo_name = "MarsGotta/jezero"
+docs_dir = "build/site-src"
+site_dir = "build/site"
+extra_css = ["assets/extra.css"]
+
+nav = [
+  { "Home" = "index.md" },
+  { "Learn" = [
+    "getting-started/tutorial.md",
+    "getting-started/connect-a-computer.md",
+  ] },
+  { "Do" = [
+    { "Running the server" = [
+      "how-to/deploy.md",
+      "how-to/sources.md",
+      "how-to/monitor.md",
+    ] },
+    { "Agents and computers" = [
+      "how-to/connect-agents.md",
+      "how-to/devices.md",
+      "how-to/app.md",
+    ] },
+    "how-to/troubleshooting.md",
+  ] },
+  { "Look up" = [
+    "reference/cli.md",
+    "reference/configuration.md",
+    "reference/connectors.md",
+    "reference/mcp-tools.md",
+    "reference/http-api.md",
+    "reference/client.md",
+    "reference/data-model.md",
+    "glossary.md",
+  ] },
+  { "Understand" = [
+    "explanation/architecture.md",
+    "explanation/search.md",
+    "explanation/summaries.md",
+    "explanation/security.md",
+    "explanation/design-decisions.md",
+  ] },
+  { "Contribute" = [
+    { "Contributing" = "https://github.com/MarsGotta/jezero/blob/main/CONTRIBUTING.md" },
+    { "Writing the docs" = "STYLE.md" },
+    { "Changelog" = "https://github.com/MarsGotta/jezero/blob/main/CHANGELOG.md" },
+  ] },
+]
+
+[project.theme]
+logo = "assets/logo.svg"
+favicon = "assets/logo.svg"
+language = "en"
+features = [
+  "navigation.instant",
+  "navigation.instant.progress",
+  "navigation.tabs",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.path",
+  "toc.follow",
+  "search.highlight",
+  "content.code.copy",
+  "content.code.annotate",
+  "content.tooltips",
+]
+
+[[project.theme.palette]]
+scheme = "slate"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dawn"
+
+[[project.theme.palette]]
+scheme = "default"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to night"
+
+[project.theme.font]
+text = "Inter"
+code = "JetBrains Mono"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/MarsGotta/jezero"
+
+[project.markdown_extensions.abbr]
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.def_list]
+[project.markdown_extensions.footnotes]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.tables]
+[project.markdown_extensions.toc]
+permalink = true
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.keys]
+[project.markdown_extensions.pymdownx.quotes]
+callouts = true
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+[project.markdown_extensions.pymdownx.emoji]
+emoji_index = "zensical.extensions.emoji.twemoji"
+emoji_generator = "zensical.extensions.emoji.to_svg"
+[project.markdown_extensions.pymdownx.tasklist]
+custom_checkbox = true

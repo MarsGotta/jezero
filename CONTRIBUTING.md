@@ -28,6 +28,10 @@ users can see comes with its docs in the same pull request.
   `uv run python scripts/make_screenshots.py`.
 - `uv run python scripts/check_docs.py` checks every relative link and anchor. CI runs
   all three checks.
+- The website is built from `docs/` with [Zensical](https://zensical.org):
+  `uv run --group docs python scripts/build_site.py --serve` previews it at
+  http://localhost:8000 with live reload. The build is strict, so a broken link fails it.
+  Every push to `main` publishes it (`.github/workflows/docs.yml`).
 
 By contributing you agree that your contributions are licensed under the Apache-2.0
 license of this project.
