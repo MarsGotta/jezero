@@ -123,6 +123,10 @@
   (`skip_project_dirs`).
 - The MCP server unit stops within 10 s: clients keep streams open and the default 90 s
   wait made restarts slow.
+- The `claude_code` connector takes a glob in `projects_dir`, like `codex` does in
+  `sessions_dir`: one connector follows the config folder of every agent an orchestrator
+  runs, reads a session copied between folders once (the newest copy), and passes the
+  folder name to the summarizer.
 - Client 0.5.1: `init --force` keeps this computer's other settings (such as `projects`)
   and, for a device the server already knows, prints the `jezero device rotate` line to
   give the admin; the "uploads refused" log line names the real fix.

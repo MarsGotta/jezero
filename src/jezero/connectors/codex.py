@@ -30,6 +30,7 @@ from .base import (
     ConnectorType,
     PromptCleaner,
     RawDoc,
+    glob_base,
     require_dir,
     segment,
     whole_session,
@@ -301,15 +302,7 @@ def _timestamp(value: Any) -> float | None:
     return None
 
 
-def _glob_base(pattern: str) -> Path:
-    """The folder a glob starts from: its parts before the first wildcard."""
-    parts = Path(pattern).parts
-    fixed = []
-    for part in parts:
-        if glob.has_magic(part):
-            break
-        fixed.append(part)
-    return Path(*fixed) if fixed else Path()
+_glob_base = glob_base
 
 
 def _unescape(value: str) -> str:

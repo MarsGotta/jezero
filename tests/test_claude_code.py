@@ -140,3 +140,42 @@ def test_trivial_sessions_are_skipped(tmp_path: Path) -> None:
     )
     conn = ClaudeCodeConnector("c", {"projects_dir": str(tmp_path)}, max_segment_chars=20_000)
     assert conn.collect(ConnectorState("c"), now=NOW).docs == []
+
+
+def test_a_glob_follows_every_agent_home_and_keeps_the_newest_copy(tmp_path: Path) -> None:
+    agents = tmp_path / "agents"
+    record = base(type="user", message={"role": "user", "content": "Ship the invoice export"})
+    for agent, mtime, extra in (
+        ("claude-alpha", NOW - 9000, "old"),
+        ("claude-beta", NOW - 7200, "new"),
+    ):
+        write_session(
+            agents / agent / ".claude" / "projects" / "-work-projects-billing-api" / "sess-1.jsonl",
+            [record, base(type="assistant", message={"role": "assistant", "content": extra})],
+            mtime,
+        )
+    write_session(
+        agents / "claude-gamma" / ".claude" / "projects" / "-work-projects-shop" / "s2.jsonl",
+        [base(type="user", sessionId="s2", message={"role": "user", "content": "Shop task"})],
+        NOW - 7200,
+    )
+    (agents / "claude-policy").mkdir()  # matches the glob, has no projects folder
+    pattern = str(agents / "claude-*" / ".claude" / "projects")
+    conn = ClaudeCodeConnector(
+        "c", {"projects_dir": pattern, "min_chars": 0}, max_segment_chars=20_000
+    )
+    docs = conn.collect(ConnectorState("c"), now=NOW).docs
+    by_id = {d.external_id.split("#")[0]: d for d in docs}
+    assert set(by_id) == {"sess-1", "s2"}
+    assert "new" in by_id["sess-1"].text and "old" not in by_id["sess-1"].text
+    assert by_id["sess-1"].meta["config_dir"] == "claude-beta"
+    assert by_id["s2"].meta["config_dir"] == "claude-gamma"
+
+
+def test_a_glob_needs_its_base_folder(tmp_path: Path) -> None:
+    import pytest
+
+    pattern = str(tmp_path / "missing" / "claude-*" / ".claude" / "projects")
+    conn = ClaudeCodeConnector("c", {"projects_dir": pattern}, max_segment_chars=20_000)
+    with pytest.raises(FileNotFoundError, match="projects_dir folder not found"):
+        conn.collect(ConnectorState("c"), now=NOW)

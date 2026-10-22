@@ -156,7 +156,9 @@ a projects folder, one subfolder per working directory, and deletes old ones by 
 days by default): the library keeps the text once it is ingested.
 
 - **Unit:** one `*.jsonl` file, found recursively under `projects_dir`. Cursor: the file's
-  modification time.
+  modification time. With a glob, the same file path (project folder and session) found
+  in two homes is read once, from the newest copy: a home copied to make another never
+  overwrites newer work.
 - **Kept:** user and assistant text; one line per tool call (`tool call: NAME ARGS`); the
   result of the tools in `keep_results_of` (`Task result: ...`); slash commands as
   `(command) NAME ARGS`; command output as `(output) ...`, shortened.
@@ -167,7 +169,7 @@ days by default): the library keeps the text once it is ingested.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `projects_dir` | path | required | Claude Code's projects folder, usually `~/.claude/projects`. Missing folder: the run fails. |
+| `projects_dir` | path or glob | required | Claude Code's projects folder, usually `~/.claude/projects`. A glob (`~/agents/claude-*/.claude/projects`) follows the config folder of every agent an orchestrator runs, including ones added later, and tells the summarizer which one each session came from (`config_dir=claude-atlas`). A missing folder fails the run. A glob that matches nothing yet does not, but the folder before its first wildcard must exist. |
 | `settle_minutes` | number | `30` | Wait until a file has not changed for this long. |
 | `include_subagents` | boolean | `false` | Also read `subagents/` transcripts and side-chain records. |
 | `include_tool_calls` | boolean | `true` | One line per tool call. |

@@ -9,11 +9,18 @@ Plumbing such as system reminders, local command output and tool results is drop
 
 Claude Code deletes old transcripts on its own (30 days by default), so the original
 text is kept in the library once ingested.
+
+`projects_dir` may be a glob (`~/agents/claude-*/.claude/projects`): orchestrators give
+each agent its own config folder, and one connector then follows all of them, new agents
+included. Each session then carries the name of the folder the first wildcard matched
+(`config_dir=claude-atlas`) as context for the summary. The same session id seen in two
+folders (a config folder copied to make another) is one item: the newest copy wins.
 """
 
 from __future__ import annotations
 
 import fnmatch
+import glob
 import json
 import os
 import re
@@ -29,6 +36,7 @@ from .base import (
     BuildContext,
     ConnectorType,
     RawDoc,
+    glob_base,
     require_dir,
     segment,
     truncate_middle,
@@ -64,7 +72,9 @@ class ClaudeCodeConnector:
         project_rules: ProjectRules | None = None,
     ) -> None:
         self.name = name
-        self.root = Path(os.path.expanduser(str(options["projects_dir"])))
+        self.root_pattern = os.path.expanduser(str(options["projects_dir"]))
+        self.is_glob = glob.has_magic(self.root_pattern)
+        self.root = Path(self.root_pattern)
         self.settle_seconds = float(options.get("settle_minutes", 30)) * 60
         self.include_subagents = bool(options.get("include_subagents", False))
         self.include_tool_calls = bool(options.get("include_tool_calls", True))
@@ -83,21 +93,33 @@ class ClaudeCodeConnector:
 
     # -- discovery ---------------------------------------------------------------------
 
-    def _files(self) -> list[Path]:
-        require_dir("projects_dir", self.root)
-        files = sorted(self.root.rglob("*.jsonl"))
-        if not self.include_subagents:
-            files = [f for f in files if "subagents" not in f.relative_to(self.root).parts]
-        if self.skip_project_dirs:
-            files = [
-                f
-                for f in files
-                if not any(
-                    fnmatch.fnmatch(f.relative_to(self.root).parts[0], g)
-                    for g in self.skip_project_dirs
-                )
-            ]
-        return files
+    def _roots(self) -> list[Path]:
+        if not self.is_glob:
+            require_dir("projects_dir", self.root)
+            return [self.root]
+        # A glob may match no agent yet, but the folder it starts from must exist.
+        require_dir("projects_dir", glob_base(self.root_pattern))
+        return sorted(Path(p) for p in glob.glob(self.root_pattern) if Path(p).is_dir())
+
+    def _config_dir(self, root: Path) -> str | None:
+        """With a glob, the folder name the first wildcard matched (the agent's home)."""
+        if not self.is_glob:
+            return None
+        depth = len(glob_base(self.root_pattern).parts)
+        return root.parts[depth] if len(root.parts) > depth else None
+
+    def _files(self) -> list[tuple[Path, Path]]:
+        """(root, file) pairs: every main transcript under every projects folder."""
+        found: list[tuple[Path, Path]] = []
+        for root in self._roots():
+            for f in sorted(root.rglob("*.jsonl")):
+                parts = f.relative_to(root).parts
+                if not self.include_subagents and "subagents" in parts:
+                    continue
+                if any(fnmatch.fnmatch(parts[0], g) for g in self.skip_project_dirs):
+                    continue
+                found.append((root, f))
+        return found
 
     def collect(
         self,
@@ -110,14 +132,20 @@ class ClaudeCodeConnector:
         now = time.time() if now is None else now
         settled_before = now - self.settle_seconds
         cursor = float(state.cursor) if state.cursor and sample is None else 0.0
-        candidates = []
-        for path in self._files():
+        newest: dict[str, tuple[float, Path, Path]] = {}
+        for root, path in self._files():
             try:
                 mtime = path.stat().st_mtime
             except FileNotFoundError:  # deleted by Claude Code's own cleanup meanwhile
                 continue
-            if mtime > cursor:
-                candidates.append((mtime, path))
+            # One session id in two config folders (one copied from the other): only the
+            # newest copy is read, so an old copy never overwrites newer work.
+            key = path.relative_to(root).as_posix()
+            known = newest.get(key)
+            if known is None or mtime > known[0]:
+                newest[key] = (mtime, root, path)
+        candidates = [(m, p) for m, _, p in newest.values() if m > cursor]
+        roots = {p: r for _, r, p in newest.values()}
         deferred = sum(1 for m, _ in candidates if m > settled_before)
         ready = sorted(
             (c for c in candidates if c[0] <= settled_before),
@@ -129,13 +157,13 @@ class ClaudeCodeConnector:
             ready = ready[:limit]
         docs: list[RawDoc] = []
         for _, path in ready:
-            docs.extend(self._session_docs(path))
+            docs.extend(self._session_docs(path, self._config_dir(roots[path])))
         next_cursor = repr(max(m for m, _ in ready)) if sample is None and ready else None
         return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
 
     # -- parsing -----------------------------------------------------------------------
 
-    def _session_docs(self, path: Path) -> list[RawDoc]:
+    def _session_docs(self, path: Path, config_dir: str | None = None) -> list[RawDoc]:
         blocks: list[tuple[int, float, str]] = []
         title: str | None = None
         session_id = path.stem
@@ -197,6 +225,7 @@ class ClaudeCodeConnector:
                     original_ref=f"claude-code-session:{session_id}",
                     meta={
                         "entrypoint": entrypoint or "unknown",
+                        **({"config_dir": config_dir} if config_dir else {}),
                         "part": number,
                         "parts": len(parts),
                     },

@@ -145,6 +145,33 @@ three sessions than on three thousand.
 
 From then on the timer runs it. [Keep an eye on Jezero](monitor.md) tells you if it stops.
 
+## Follow the agents of an orchestrator
+
+Orchestrators that run many agents often give each one its own config folder, so their
+sessions are not in your `~/.claude/projects` or `~/.codex/sessions`. One connector can
+follow all of them with a glob, and picks up agents added later:
+
+```toml
+[[connectors]]
+name = "agent-claude-code-team"
+type = "claude_code"
+enabled = false
+[connectors.options]
+projects_dir = "~/agents/claude-*/.claude/projects"
+
+[[connectors]]
+name = "agent-codex-team"
+type = "codex"
+enabled = false
+[connectors.options]
+sessions_dir = "~/agents/*/codex-home/sessions"
+```
+
+Each Claude Code session tells the summarizer which folder it came from
+(`config_dir=claude-atlas`), so summaries can name the agent. Pilot it like any new
+source, then decide which keys may read it: add the source name to the `sources` of the
+keys the agents themselves use if they should see each other's work.
+
 ## Choose how often it runs
 
 The timer starts `jezero run --due` every 5 minutes. `--due` runs each enabled connector

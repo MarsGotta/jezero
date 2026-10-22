@@ -53,6 +53,18 @@ def require_dir(option: str, path: Path) -> None:
         raise FileNotFoundError(f"{option} folder not found: {path}")
 
 
+def glob_base(pattern: str) -> Path:
+    """The folder a glob starts from: its parts before the first wildcard."""
+    import glob
+
+    fixed = []
+    for part in Path(pattern).parts:
+        if glob.has_magic(part):
+            break
+        fixed.append(part)
+    return Path(*fixed) if fixed else Path()
+
+
 def require_file(option: str, path: Path) -> None:
     if not path.is_file():
         raise FileNotFoundError(f"{option} file not found: {path}")
