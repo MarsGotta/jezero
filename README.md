@@ -75,9 +75,18 @@ atoms     decision  Load analytics only after the visitor accepts the banner.
 
 **Status: pre-alpha.** Everything above is implemented and tested; email comes next.
 
+## Install
+
+Requires Python 3.12+ on Linux or macOS.
+
+```bash
+uv tool install jezero      # or: pipx install jezero, or: pip install jezero
+jezero --version
+```
+
 ## Get started
 
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+From a checkout, with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 git clone https://github.com/MarsGotta/jezero.git && cd jezero
@@ -119,7 +128,7 @@ and installs or updates the plugins on this computer.
 </p>
 
 ```bash
-uv tool install git+https://github.com/MarsGotta/jezero
+uv tool install jezero
 jezero ui --demo        # look around with made-up data
 ```
 
@@ -147,8 +156,7 @@ Bug reports, ideas and pull requests are welcome: start with
 
 1. Gmail connector (read-only scope, per thread, newsletters skipped).
 2. A folder watcher for agents without hooks (Cursor) on other computers.
-3. A retrieval benchmark command (questions with expected hits, top-k accuracy).
-4. Optional vector search with sqlite-vec.
+3. Optional vector search with sqlite-vec.
 
 ## The name
 

@@ -74,7 +74,10 @@ LATER_DEFAULT_LIMIT = 5
 RELOAD_INTERVAL_SECONDS = 1.0
 """The config file is checked for changes to `[[clients]]` at most this often."""
 
-BUNDLE_HINT = "run python3 scripts/build_clients.py on the server to build it"
+BUNDLE_HINT = (
+    "run python3 scripts/build_clients.py in a checkout, or download jezero-client.tar.gz "
+    "from the GitHub release of this version"
+)
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
 

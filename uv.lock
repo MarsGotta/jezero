@@ -317,13 +317,13 @@ wheels = [
 
 [[package]]
 name = "jezero"
-version = "0.1.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
     { name = "mcp" },
     { name = "pydantic" },
     { name = "rich" },
+    { name = "starlette" },
     { name = "textual" },
     { name = "uvicorn" },
     { name = "zstandard" },
@@ -341,11 +341,12 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", specifier = ">=1.20" },
-    { name = "pydantic", specifier = ">=2.7" },
-    { name = "rich", specifier = ">=14" },
+    { name = "mcp", specifier = ">=2.0,<3" },
+    { name = "pydantic", specifier = ">=2.12" },
+    { name = "rich", specifier = ">=14.2" },
+    { name = "starlette", specifier = ">=0.27" },
     { name = "textual", specifier = ">=8.2" },
-    { name = "uvicorn", specifier = ">=0.30" },
+    { name = "uvicorn", specifier = ">=0.31.1" },
     { name = "zstandard", specifier = ">=0.22" },
 ]
 

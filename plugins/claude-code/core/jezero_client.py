@@ -1030,7 +1030,10 @@ def _installed_core() -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     if Path(__file__).resolve() != target.resolve():
         shutil.copyfile(__file__, str(target))
+        # Next to this file in a plugin; inside the installed package it is projects.py.
         projects = Path(__file__).with_name("jezero_projects.py")
+        if not projects.is_file():
+            projects = Path(__file__).with_name("projects.py")
         if projects.is_file():
             shutil.copyfile(str(projects), str(target.with_name("jezero_projects.py")))
     return target

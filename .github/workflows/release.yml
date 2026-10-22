@@ -1,0 +1,150 @@
+name: release
+
+# Publishes Jezero to PyPI when a version tag (v0.1.0, v0.2.0rc1...) is pushed, with PyPI
+# Trusted Publishing (OIDC): no API token is stored anywhere. The tag must equal
+# `v` + jezero.__version__. A manual run (workflow_dispatch) publishes to TestPyPI only.
+# No untrusted input from the event reaches a shell: the tag goes through env vars.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: false # no cache in a publishing workflow
+      - run: uv sync --locked --python ${{ matrix.python }}
+      - run: uv run --python ${{ matrix.python }} pytest
+      - if: matrix.python == '3.13'
+        run: |
+          uv run ruff check src tests scripts clients
+          uv run ruff format --check src tests scripts clients
+          python3 scripts/privacy_check.py --all
+          python3 scripts/build_clients.py --check
+          uv run python scripts/make_reference.py --check
+          uv run python scripts/check_docs.py
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: false # no cache in a publishing workflow
+      - name: The tag matches the package version
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/jezero/__init__.py)
+          if [ "v$version" != "$TAG" ]; then
+            echo "tag $TAG does not match __version__ $version" >&2
+            exit 1
+          fi
+          grep -q "^## $version " CHANGELOG.md || { echo "CHANGELOG.md has no '## $version' section" >&2; exit 1; }
+      # Its own folder: scripts/build_clients.py also writes to dist/, and everything in
+      # the folder handed to the publish action is uploaded to PyPI.
+      - run: uv build --out-dir pypi-dist
+      - run: uvx twine check --strict pypi-dist/*
+      - name: Smoke test the wheel in a clean environment
+        run: |
+          uv venv /tmp/smoke --python 3.13
+          VIRTUAL_ENV=/tmp/smoke uv pip install pypi-dist/*.whl
+          cd "$(mktemp -d)"
+          printf '[storage]\npath = "data/jezero.db"\n' > jezero.toml
+          /tmp/smoke/bin/jezero --version
+          /tmp/smoke/bin/jezero init
+          /tmp/smoke/bin/jezero import-jsonl "$GITHUB_WORKSPACE/examples/items.example.jsonl" --source demo
+          /tmp/smoke/bin/jezero search "migration rollback"
+          /tmp/smoke/bin/jezero eval "$GITHUB_WORKSPACE/examples/eval.example.toml"
+          /tmp/smoke/bin/python -c "import jezero.server, jezero.ui.app"
+      - name: Client bundle for servers installed from PyPI
+        run: python3 scripts/build_clients.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pypi-dist
+          path: pypi-dist/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: client-bundle
+          path: dist/jezero-client.tar.gz
+          if-no-files-found: error
+
+  publish-pypi:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/jezero/
+    permissions:
+      id-token: write # Trusted Publishing; also signs PEP 740 attestations
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pypi-dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  publish-testpypi:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/jezero/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pypi-dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  github-release:
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: assets/
+          merge-multiple: true
+      - name: Release with the CHANGELOG section and the files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          awk -v v="$version" '$0 ~ "^## " v " " {f=1; next} /^## /{if (f) exit} f' CHANGELOG.md > notes.md
+          prerelease=""
+          case "$version" in *a*|*b*|*rc*|*dev*) prerelease="--prerelease" ;; esac
+          gh release create "$TAG" assets/* --repo "$GITHUB_REPOSITORY" --title "Jezero $version" \
+            --notes-file notes.md --verify-tag $prerelease

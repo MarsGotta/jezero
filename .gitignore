@@ -28,3 +28,9 @@ build/
 .DS_Store
 .idea/
 .vscode/
+pypi-dist/
+
+# Local leftovers that must never reach a package: config backups, caches, logs.
+*.toml.bak-*
+.cache/
+*.log

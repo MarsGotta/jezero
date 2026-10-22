@@ -380,7 +380,8 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
     config_path = resolve_config_path(path)
     if not config_path.is_file():
         raise FileNotFoundError(
-            f"config not found at {config_path}. Copy jezero.example.toml to "
+            f"config not found at {config_path}. Copy jezero.example.toml (from a checkout, "
+            "or https://github.com/MarsGotta/jezero/blob/main/jezero.example.toml) to "
             f"{DEFAULT_CONFIG_NAME} or set {CONFIG_ENV_VAR}."
         )
     env_file = config_path.parent / ".env"

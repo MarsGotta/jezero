@@ -329,7 +329,10 @@ def test_model_guess_goes_through_aliases_and_retag_fixes_old_ones(tmp_path: Pat
 
     aliased = make_config(
         tmp_path,
-        options={"projects_dir": str(tmp_path / "claude"), "project_aliases": {"northwind": "atlas"}},
+        options={
+            "projects_dir": str(tmp_path / "claude"),
+            "project_aliases": {"northwind": "atlas"},
+        },
     )
     cfg_file = tmp_path / "jezero.toml"
     cfg_file.write_text(
@@ -393,7 +396,11 @@ projects_dir = "{tmp_path / "claude"}"
     assert cli_main([*args, "--log", str(log)]) == 0
     (hit,) = store.search("Synthetic")
     assert hit.item.project == "synthetic"  # named in its own title, so it is used
-    assert json.loads(log.read_text()) == {"id": hit.item.id, "old": "Northwind", "new": "synthetic"}
+    assert json.loads(log.read_text()) == {
+        "id": hit.item.id,
+        "old": "Northwind",
+        "new": "synthetic",
+    }
     assert "Northwind -> synthetic" in capsys.readouterr().err
 
 

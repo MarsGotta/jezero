@@ -1,8 +1,7 @@
 [project]
 name = "jezero"
-version = "0.1.0.dev0"
+dynamic = ["version", "readme"]
 description = "A shared, searchable library of your agents' past work: connectors, summaries with atoms, SQLite FTS5 search, served over MCP."
-readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
@@ -10,25 +9,34 @@ authors = [{ name = "Marcela Gotta" }]
 keywords = ["mcp", "agents", "memory", "knowledge-base", "sqlite", "fts5", "bm25"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
     "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development",
+    "Topic :: Text Processing :: Indexing",
 ]
 dependencies = [
-    "mcp>=1.20",
-    "pydantic>=2.7",
+    "mcp>=2.0,<3",          # uses mcp.server.mcpserver (SDK 2.x); 1.x fails at import
+    "pydantic>=2.12",       # what mcp 2.0 requires anyway
     "httpx>=0.27",
-    "uvicorn>=0.30",
+    "starlette>=0.27",      # imported directly by jezero.server (Route, responses)
+    "uvicorn>=0.31.1",
     "zstandard>=0.22",
     "textual>=8.2",
-    "rich>=14",
+    "rich>=14.2",           # textual 8.2 requires it
 ]
 
 [project.urls]
-Homepage = "https://github.com/MarsGotta/jezero"
-Repository = "https://github.com/MarsGotta/jezero"
+Homepage = "https://jezero.marsgotta.com"
+Documentation = "https://jezero.marsgotta.com"
+Source = "https://github.com/MarsGotta/jezero"
 Issues = "https://github.com/MarsGotta/jezero/issues"
 Changelog = "https://github.com/MarsGotta/jezero/blob/main/CHANGELOG.md"
 
@@ -45,8 +53,44 @@ docs = [
 ]
 
 [build-system]
-requires = ["hatchling>=1.26"]
+requires = ["hatchling>=1.26", "hatch-fancy-pypi-readme>=24.1"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/jezero/__init__.py"  # single source: `jezero --version` and the metadata agree
+
+# PyPI renders the README without the repository around it: make relative links and
+# images absolute at build time, so the README in the repo keeps its relative links.
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = 'src="(?!https?://)([^"]+)"'
+replacement = 'src="https://raw.githubusercontent.com/MarsGotta/jezero/main/\1"'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '\]\((?!https?://|mailto:|#)([^)]+)\)'
+replacement = '](https://github.com/MarsGotta/jezero/blob/main/\1)'
+
+[tool.hatch.build.targets.sdist]
+# What is needed to build the wheel and run the tests; not the website, CI or screenshots.
+include = [
+    "/src",
+    "/tests",
+    "/clients",
+    "/scripts",
+    "/plugins",
+    "/examples",
+    "/jezero.example.toml",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/CONTRIBUTING.md",
+    "/SECURITY.md",
+    "/LICENSE",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/jezero"]

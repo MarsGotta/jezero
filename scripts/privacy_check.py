@@ -6,7 +6,7 @@ Two layers:
    directories, private-network addresses, credential shapes).
 2. A private, git-ignored `.privacy-denylist` file with one term per line (host names,
    people, employers, projects). Matching is case-insensitive. Lines starting with `#`
-   are comments.
+   are comments; `word:NAME` matches NAME only as a whole word.
 
 Usage: `python scripts/privacy_check.py` checks staged files (what the hook runs);
 `--all` checks every tracked file.
@@ -62,7 +62,17 @@ def _denylist() -> list[re.Pattern[str]]:
     if not DENYLIST.is_file():
         return []
     terms = [t.strip() for t in DENYLIST.read_text(encoding="utf-8").splitlines()]
-    return [re.compile(re.escape(t), re.IGNORECASE) for t in terms if t and not t.startswith("#")]
+    patterns = []
+    for term in terms:
+        if not term or term.startswith("#"):
+            continue
+        # `word:NAME` matches NAME as a whole word only, for short names that are also
+        # parts of common words (a name like "Ada" inside "Canada").
+        if term.startswith("word:"):
+            patterns.append(re.compile(r"\b" + re.escape(term[5:]) + r"\b", re.IGNORECASE))
+        else:
+            patterns.append(re.compile(re.escape(term), re.IGNORECASE))
+    return patterns
 
 
 def scan(paths: list[str], *, staged: bool) -> list[str]:
