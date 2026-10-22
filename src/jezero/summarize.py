@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import random
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -198,6 +199,14 @@ class Summarizer:
                         raise SummarizerError(f"summarizer failed after retries: {exc}") from exc
                     await asyncio.sleep(delay + random.uniform(0, 1))  # noqa: S311
                     delay *= 2
+                except SummarizerError:
+                    self.usage.failures += 1
+                    raise
+                except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError) as exc:
+                    # An answer of an unexpected shape (a proxy's HTML page, `content: null`)
+                    # is this document's failure, never a crash of the whole run.
+                    self.usage.failures += 1
+                    raise SummarizerError(f"malformed answer from the summarizer: {exc!r}") from exc
         raise SummarizerError("unreachable")
 
     async def _anthropic(
@@ -231,10 +240,10 @@ class Summarizer:
             },
         )
         body = _check(resp)
-        self._count(body.get("model", self.config.model), body.get("usage", {}))
-        for block in body.get("content", []):
-            if block.get("type") == "tool_use":
-                return block.get("input", {})
+        self._count(body.get("model") or self.config.model, _as_dict(body.get("usage")))
+        for block in _as_list(body.get("content")):
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                return _object(block.get("input"))
         raise SummarizerError("model returned no structured summary")
 
     async def _openai(
@@ -261,24 +270,25 @@ class Summarizer:
             },
         )
         body = _check(resp)
-        usage = body.get("usage", {})
+        usage = _as_dict(body.get("usage"))
         self._count(
-            body.get("model", self.config.model),
+            body.get("model") or self.config.model,
             {
                 "input_tokens": usage.get("prompt_tokens", 0),
                 "output_tokens": usage.get("completion_tokens", 0),
             },
         )
         try:
-            return json.loads(body["choices"][0]["message"]["content"])
-        except (KeyError, IndexError, json.JSONDecodeError) as exc:
-            raise SummarizerError(f"unparseable response: {exc}") from exc
+            return _object(json.loads(body["choices"][0]["message"]["content"]))
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise SummarizerError(f"unparseable response: {exc!r}") from exc
 
-    def _count(self, model: str, usage: dict[str, Any]) -> None:
+    def _count(self, model: Any, usage: dict[str, Any]) -> None:
         self.usage.calls += 1
-        self.usage.input_tokens += int(usage.get("input_tokens", 0) or 0)
-        self.usage.output_tokens += int(usage.get("output_tokens", 0) or 0)
-        self.usage.by_model[model] = self.usage.by_model.get(model, 0) + 1
+        self.usage.input_tokens += _tokens(usage.get("input_tokens"))
+        self.usage.output_tokens += _tokens(usage.get("output_tokens"))
+        name = str(model)
+        self.usage.by_model[name] = self.usage.by_model.get(name, 0) + 1
 
 
 class _Retryable(Exception):
@@ -290,15 +300,45 @@ def _check(resp: httpx.Response) -> dict[str, Any]:
         raise _Retryable(f"HTTP {resp.status_code}")
     if resp.status_code >= 400:
         try:
-            detail = resp.json().get("error", {})
+            detail = _as_dict(resp.json()).get("error", {})
             message = detail.get("message") if isinstance(detail, dict) else str(detail)
         except ValueError:
             message = resp.text[:200]
         raise SummarizerError(f"HTTP {resp.status_code}: {message}")
-    return resp.json()
+    try:
+        body = resp.json()
+    except ValueError as exc:
+        snippet = " ".join(resp.text[:120].split())
+        raise SummarizerError(
+            f"HTTP {resp.status_code} with a body that is not JSON: {snippet!r}"
+        ) from exc
+    if not isinstance(body, dict):
+        raise SummarizerError(
+            f"HTTP {resp.status_code} with a JSON {type(body).__name__}, not an object"
+        )
+    return body
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _object(value: Any) -> dict[str, Any]:
+    """The structured answer must be a JSON object."""
+    if not isinstance(value, dict):
+        raise SummarizerError(f"the answer is a {type(value).__name__}, not a JSON object")
+    return value
+
+
+def _tokens(value: Any) -> int:
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _parse(data: dict[str, Any]) -> Summary:
+    data = _clean_strings(data)
     atoms = []
     for raw in _as_list(data.get("atoms")):
         if isinstance(raw, str):
@@ -323,6 +363,21 @@ def _parse(data: dict[str, Any]) -> Summary:
         q.strip() for q in _as_list(data.get("questions")) if isinstance(q, str) and q.strip()
     ]
     return Summary(title, summary, questions[:MAX_QUESTIONS], atoms[:MAX_ATOMS], project)
+
+
+def _clean_strings(value: Any) -> Any:
+    """Replace lone UTF-16 surrogates (an emoji cut in two, escaped as `\\ud83d`), which
+    SQLite cannot store, in every string of the answer."""
+    if isinstance(value, str):
+        return _SURROGATE.sub("\ufffd", value)
+    if isinstance(value, dict):
+        return {k: _clean_strings(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_clean_strings(v) for v in value]
+    return value
+
+
+_SURROGATE = re.compile(r"[\ud800-\udfff]")
 
 
 def _as_list(value: Any) -> list[Any]:

@@ -236,7 +236,8 @@ through a reverse proxy with TLS, on a private network such as a VPN or a mesh n
 Without a proxy, you can bind `server.host` to the server's address on the private
 network instead, if that network already encrypts traffic. Keep `require_auth = true`:
 Jezero rejects a config that turns authentication off on any address other than
-loopback. With `host = "0.0.0.0"`, list in `allowed_hosts` every address or name the
+loopback, or together with `public_url` or `allowed_hosts` (behind a proxy, a loopback
+server is reachable from wherever the proxy is). With `host = "0.0.0.0"`, list in `allowed_hosts` every address or name the
 computers use to reach it (`"192.0.2.10:*"`): any other gets status 421, uploads
 included.
 
@@ -271,8 +272,8 @@ Computers install the plugins from a bundle that your server offers at
 ## Restart after configuration changes
 
 `jezero serve` reads `[[clients]]` again by itself: at most once a second it checks
-whether `jezero.toml` changed, and if the file still loads, it takes the new list of
-clients. So [`jezero device approve`](../reference/cli.md#jezero-device-approve),
+whether `jezero.toml` or the `.env` next to it changed, and if the file still loads, it
+takes the new list of clients and the current values of their `token_env` variables. So [`jezero device approve`](../reference/cli.md#jezero-device-approve),
 `device revoke`, `device rotate` and edits to a client's `sources` or `upload` need no
 restart:
 
@@ -280,9 +281,16 @@ restart:
 approved laptop; the server picks up the new key within a second (backup: /home/me/jezero/jezero.toml.bak-20261022T034500Z)
 ```
 
-If the edited file does not load, the server keeps the clients it had and logs
-`config changed but could not be loaded; keeping the previous N clients`. Run
-`jezero check-config` to find the error.
+If the edited file does not load, the server keeps only the clients whose `[[clients]]`
+entry is unchanged since the last good load and refuses the keys of the ones you removed
+or edited, until the file loads. It logs `config changed but could not be loaded (...);
+keeping the previous clients whose [[clients]] entry is unchanged (...)`. Run
+`jezero check-config` to find the error. You fix the file on the server itself, so no key
+is needed to recover.
+
+> [!NOTE]
+> A variable set by the service manager (an `Environment=` line) wins over `.env` and is
+> read only at start: change it, then restart the server.
 
 Everything else the server reads once, when it starts. Restart it after any change to
 `[server]`, `[search]`, `[inbox]` or `[storage]`:

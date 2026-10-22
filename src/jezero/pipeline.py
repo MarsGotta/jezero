@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from .config import Config, ConnectorConfig
 from .connectors import CONNECTOR_TYPES
@@ -16,6 +18,10 @@ from .store import ConnectorState, Store
 from .summarize import Summarizer, SummarizerError
 
 CHUNK = 16
+_LONE_SURROGATE = re.compile(r"[\ud800-\udfff]")
+"""Half of a UTF-16 pair, as JSON-escaped by a tool that cut an emoji in two (`\\ud83d`).
+Python reads it into a string that cannot be encoded as UTF-8, which the hash, the HTTP
+request and SQLite all need."""
 
 
 @dataclass(slots=True)
@@ -90,19 +96,24 @@ async def run_connector(
     batch = connector.collect(state, limit=limit, sample=sample)
     report.docs = len(batch.docs)
     report.deferred_sessions = batch.deferred
-    report.warnings = list(batch.warnings)
+    report.warnings = list(batch.warnings) + list(batch.skipped)
     redactor = Redactor(config.redaction.extra_patterns, enabled=config.redaction.enabled)
 
+    failed_ids: set[str] = set()
     pending: list[tuple[RawDoc, str, str]] = []
     for doc in batch.docs:
-        cleaned = redactor.redact(doc.text)
-        report.redactions += cleaned.count
-        digest = content_hash(cleaned.text)
-        if store.known_hash(conn.name, doc.external_id) == digest:
+        try:
+            text = _prepare(doc, redactor, report)
+            digest = content_hash(text)
+            known = store.known_hash(conn.name, doc.external_id) == digest
+        except Exception as exc:  # noqa: BLE001 - one bad unit must not stop the batch
+            _record_failure(report, failed_ids, doc.external_id, exc)
+            continue
+        if known:
             report.unchanged += 1
             continue
-        report.input_chars += len(cleaned.text)
-        pending.append((doc, cleaned.text, digest))
+        report.input_chars += len(text)
+        pending.append((doc, text, digest))
 
     if not pending:
         report.note = "nothing to summarise" + (
@@ -113,7 +124,6 @@ async def run_connector(
     if dry_run:
         return report
 
-    failed_ids: set[str] = set()
     if pending:
         summarizer = summarizer or Summarizer(
             config.summarizer, known_projects=config.summarizer.known_projects
@@ -129,7 +139,8 @@ async def run_connector(
 
     now = datetime.now(UTC).isoformat()
     ok = report.failed == 0
-    advance = ok and not report.warnings and batch.next_cursor
+    # Skipped units do not hold the cursor (reading them again cannot help); warnings do.
+    advance = ok and not batch.warnings and batch.next_cursor
     problems = report.errors[:3] + report.warnings[:2]
     store.set_state(
         ConnectorState(
@@ -142,6 +153,41 @@ async def run_connector(
         )
     )
     return report
+
+
+def _clean(text: str) -> str:
+    return _LONE_SURROGATE.sub("\ufffd", text) if _LONE_SURROGATE.search(text) else text
+
+
+def _prepare(doc: RawDoc, redactor: Redactor, report: RunReport) -> str:
+    """Make `doc` safe to send and store: lone surrogates replaced, secrets redacted in the
+    text and in what goes to the model with it (the title hint and the meta values).
+    Returns the redacted text."""
+    cleaned = redactor.redact(_clean(doc.text))
+    report.redactions += cleaned.count
+    if doc.title_hint:
+        title = redactor.redact(_clean(doc.title_hint))
+        report.redactions += title.count
+        doc.title_hint = title.text
+    doc.meta = {k: _redact_value(v, redactor, report) for k, v in doc.meta.items()}
+    return cleaned.text
+
+
+def _redact_value(value: Any, redactor: Redactor, report: RunReport) -> Any:
+    if isinstance(value, str):
+        result = redactor.redact(_clean(value))
+        report.redactions += result.count
+        return result.text
+    if isinstance(value, list | tuple):
+        return [_redact_value(v, redactor, report) for v in value]
+    return value
+
+
+def _record_failure(report: RunReport, failed_ids: set[str], key: str, exc: BaseException) -> None:
+    report.failed += 1
+    failed_ids.add(key)
+    detail = str(exc) if isinstance(exc, SummarizerError) else f"{type(exc).__name__}: {exc}"
+    report.errors.append(f"{key}: {detail}")
 
 
 async def _summarise_and_store(
@@ -169,15 +215,15 @@ async def _summarise_and_store(
         )
         items: list[NewItem] = []
         for (doc, text, digest), result in zip(chunk, results, strict=True):
+            if isinstance(result, asyncio.CancelledError | KeyboardInterrupt):
+                raise result
             if isinstance(result, BaseException):
-                report.failed += 1
-                report.errors.append(f"{doc.external_id}: {result}")
-                failed_ids.add(doc.external_id)
-                if not isinstance(result, SummarizerError):
-                    raise result
+                # Paid summaries of the rest of the chunk are still stored; this one keeps
+                # the cursor where it was, so the next run tries it again.
+                _record_failure(report, failed_ids, doc.external_id, result)
                 continue
-            items.append(
-                NewItem(
+            try:
+                item = NewItem(
                     source=conn.name,
                     external_id=doc.external_id,
                     occurred_at=doc.occurred_at,
@@ -195,7 +241,10 @@ async def _summarise_and_store(
                     trust=conn.effective_trust,
                     content_hash=digest,
                 )
-            )
+            except Exception as exc:  # noqa: BLE001 - one bad unit must not stop the batch
+                _record_failure(report, failed_ids, doc.external_id, exc)
+                continue
+            items.append(item)
         report.stored += sum(1 for o in store.upsert_many(items) if o != "unchanged")
 
 
@@ -247,11 +296,10 @@ async def resummarize_items(
         )
         fresh: list[NewItem] = []
         for item, result in zip(chunk, results, strict=True):
+            if isinstance(result, asyncio.CancelledError | KeyboardInterrupt):
+                raise result
             if isinstance(result, BaseException):
-                report.failed += 1
-                report.errors.append(f"{item.id}: {result}")
-                if not isinstance(result, SummarizerError):
-                    raise result
+                _record_failure(report, set(), str(item.id), result)
                 continue
             fresh.append(
                 NewItem(

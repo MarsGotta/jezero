@@ -13,7 +13,9 @@ Rules, first match wins:
    Needs the folder to exist on this computer; sessions uploaded from other computers
    carry the answer their client found (a `<session file>.project` file next to it).
 3. `roots`: folder names that hold projects (`projects`, `code`, `dev`...), case
-   insensitive: the folder right below the first one is the project.
+   insensitive: the folder right below the first one is the project. The home folder
+   itself never counts: for a user called `dev`, a `notes` folder in their home is not
+   project `notes`.
 4. Nothing: the summariser decides from the text.
 
 `aliases` rename the result (`"atlas-wt" = "atlas"`).
@@ -22,6 +24,7 @@ Rules, first match wins:
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Iterable
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any
@@ -56,7 +59,9 @@ _GENERIC = {
     "documents",
     "downloads",
 }
-_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$", re.IGNORECASE)
+_NAME = re.compile(r"^[^\W_][\w.-]*$")
+"""A folder name usable as a project: letters (any script, so `diseño` counts), digits,
+`.`, `_` and `-`, starting with a letter or digit."""
 _UUIDISH = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-", re.IGNORECASE)
 SIDECAR_SUFFIX = ".project"
 
@@ -80,11 +85,17 @@ def _home_length(parts: tuple[str, ...]) -> int:
 
 
 def _usable(name: str) -> bool:
+    name = _nfc(name)
     return bool(_NAME.match(name)) and not _UUIDISH.match(name) and name.lower() not in _GENERIC
 
 
+def _nfc(name: str) -> str:
+    """One spelling per name: macOS stores `diseño` decomposed (n + combining tilde)."""
+    return unicodedata.normalize("NFC", name)
+
+
 def _norm(name: str) -> str:
-    return name.lower()
+    return _nfc(name).lower()
 
 
 class ProjectRules:
@@ -160,7 +171,11 @@ class ProjectRules:
 
     def _from_roots(self, cwd: str) -> str | None:
         parts = _parts(cwd)
+        # Start below the home folder: a user named like a root (`dev`, `code`) is not one.
+        start = _home_length(parts)
         for i, part in enumerate(parts[:-1]):
+            if i < start:
+                continue
             if part.lower() in self.roots:
                 for name in parts[i + 1 :]:  # skip `worktrees`, `apps`...
                     if _usable(name):
@@ -216,7 +231,7 @@ def read_sidecar(session_file: Path) -> str | None:
         text = Path(str(session_file) + SIDECAR_SUFFIX).read_text(encoding="utf-8").strip()
     except OSError:
         return None
-    return text if _NAME.match(text) else None
+    return text if _NAME.match(_nfc(text)) else None
 
 
 DEFAULT_RULES = ProjectRules()

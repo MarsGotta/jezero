@@ -212,15 +212,21 @@ makes the retry cheap: segments already stored are skipped without a model call.
 connector that finds a format it no longer understands reports a warning; the pipeline
 records it as the connector's error and holds the cursor, so `jezero health` keeps
 showing the problem until it is fixed, instead of the connector silently skipping data.
+A single unit that cannot be read at all (a malformed file) is different: retrying cannot
+fix it, so the connector skips it, the run reports it as the connector's error, and the
+cursor moves on, so one bad file never blocks a source.
 
 **One broken source does not stop the others.** `jezero run` runs connectors one after
 another and catches each one's exception, records it in that connector's state and moves
 on. A summariser call that fails after its retries counts as one failed document, not a
-failed run. Malformed model output is caught the same way.
+failed run. Malformed model output is caught the same way, and so is any other error
+while one document is summarised or stored: the rest of the batch is kept.
 
 **One run at a time.** `jezero run`, `retag` and `resummarize` take an exclusive lock on a
 file next to the database. A timer that fires during a long manual backfill skips with
-"another run is in progress" instead of summarising the same sessions twice.
+"another run is in progress" instead of summarising the same sessions twice. `retag` and
+`resummarize` do nothing in that case too, but exit with code 3, so a script does not take
+the skip for success.
 
 **Sessions are summarised when they are finished.** Connectors defer a session until it
 has been quiet for `settle_minutes`, so a conversation in progress is not summarised every

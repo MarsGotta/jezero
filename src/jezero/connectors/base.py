@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -81,6 +82,50 @@ class Batch:
     """Problems that must reach the watchdog, such as a source format the connector no
     longer understands. The pipeline records them as the connector's error and keeps the
     cursor where it was, so the alert stays until the cause is fixed."""
+    skipped: list[str] = field(default_factory=list)
+    """Units that could not be read at all (a malformed file) and were left out. They are
+    reported as the run's error, but the cursor moves past them: reading the same bytes
+    again cannot succeed, and holding the cursor would re-read every newer unit forever."""
+
+
+TRANSIENT_ERRORS: tuple[type[BaseException], ...] = (OSError, sqlite3.OperationalError)
+"""Errors that may go away on the next run (a locked database, a network folder): they
+fail the run instead of skipping the unit, so the cursor stays and the unit is read again."""
+
+
+def read_or_skip[T](
+    label: str,
+    skipped: list[str],
+    read: Callable[[], T],
+    *,
+    transient: tuple[type[BaseException], ...] = (),
+) -> T | None:
+    """Run `read` for one unit (a session, a file, an issue). When the unit itself is
+    malformed, note it in `skipped` and return None, so one bad unit never blocks the rest
+    of the source. Transient errors are raised as before."""
+    try:
+        return read()
+    except TRANSIENT_ERRORS + transient:
+        raise
+    except Exception as exc:  # noqa: BLE001 - any parse error of one unit
+        skipped.append(f"skipped {label}: {type(exc).__name__}: {exc}"[:300])
+        return None
+
+
+def batch_full(
+    taken: int, stamp: float, last: float | None, *, limit: int | None, sample: int | None
+) -> bool:
+    """Whether a collect loop must stop before the next unit (timestamp `stamp`).
+
+    `limit` never cuts inside a group of units with the same timestamp: the cursor becomes
+    the newest timestamp processed and the next run reads strictly newer units, so the rest
+    of the group would be skipped for good. `last` is the timestamp of the last unit taken.
+    """
+    if sample is not None:
+        return taken >= sample
+    if limit is None or taken < limit:
+        return False
+    return last is None or stamp != last
 
 
 class Connector(Protocol):

@@ -306,7 +306,7 @@ jezero connector reset [-h] [--yes] name
 
 ### `jezero resummarize`
 
-Summarise stored items again from their original.
+Summarise stored items again from their original (exit 3 if a run holds the lock).
 
 ```text
 jezero resummarize [-h] [--ids IDS] [--ids-file IDS_FILE]
@@ -319,7 +319,7 @@ jezero resummarize [-h] [--ids IDS] [--ids-file IDS_FILE]
 
 ### `jezero retag`
 
-Re-apply the source's project hints and the project aliases, without the LLM.
+Re-apply the source's project hints and the project aliases, without the LLM (exit 3 if a run holds the lock).
 
 ```text
 jezero retag [-h] --connector CONNECTOR [--dry-run] [--ask-model] [--log PATH]
@@ -359,7 +359,7 @@ Create this device's key.
 
 ```text
 jezero_client init [-h] --url URL --device DEVICE [--force] [--no-upload]
-                          [--mcp-path MCP_PATH]
+                          [--mcp-path MCP_PATH] [--insecure-http]
 ```
 
 | Argument | | Meaning |
@@ -369,6 +369,7 @@ jezero_client init [-h] --url URL --device DEVICE [--force] [--no-upload]
 | `--force` | optional | replace an existing key on this computer |
 | `--no-upload` | optional | only read Jezero; never upload this computer's sessions |
 | `--mcp-path` `MCP_PATH` | optional | URL path of the server's MCP endpoint, when its admin changed it (default /mcp) |
+| `--insecure-http` | optional | accept a plain http:// URL for another computer (the key travels in clear) |
 
 ### `jezero_client.py status`
 

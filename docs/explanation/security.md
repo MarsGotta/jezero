@@ -68,6 +68,15 @@ SHA256`. The server reads `[[clients]]` again within a second of a change, so a 
 key stops working on every route at once, without a restart. Keys do not expire on their
 own.
 
+Reloading fails closed. When the edited file does not load (a typo), the server cannot
+tell what the admin meant, so it keeps only the clients whose `[[clients]]` entry is still
+there with exactly the text it had at the last good load. A client that was removed,
+rotated or otherwise edited is refused until the file loads again; untouched clients keep
+working. The `.env` file next to the config is watched the same way: a `token_env` key
+changed or removed there takes effect within a second. The `jezero device` commands
+refuse to write a file that changed after they read it, so two of them run at the same
+moment cannot undo each other.
+
 On the computer, the key stays in its file. The agents reach the server through a local
 stdio bridge (`jezero_client.py mcp`) that reads the key file and adds the header to each
 request: the Claude Code and Antigravity plugins ship it as their MCP server, and
@@ -115,7 +124,11 @@ write path has its own, narrower rules:
   decompression. A body without `Content-Length` (chunked) is read in pieces and refused
   as soon as it passes the limit, so it never sits whole in memory; gzip and zstd are
   decompressed in chunks and stop at the limit. Only identity, gzip and zstd encodings
-  are accepted.
+  are accepted. A Codex `.jsonl.zst` file is stored compressed, as sent, but only after
+  it was decompressed in chunks and found within the same limit, so a small file that
+  expands to gigabytes is refused with 413.
+- An optional quota, `inbox.max_device_mb`, caps the space of each device's folder:
+  uploads beyond it get 507. It is off by default.
 - Writes are atomic (a temporary file and a rename). The project header is checked
   against a strict pattern before it is stored next to the file.
 
@@ -165,7 +178,9 @@ connectors. A connector option whose name looks like a secret (`api_key`, `token
 rejected when the config loads.
 
 A git-ignored `.env` file next to the config is loaded automatically; variables already
-set in the environment win, so a service manager can always override it.
+set in the environment win, so a service manager can always override it. Variables that
+came from the file follow it: the server reloads it when it changes, so a new or removed
+`token_env` key applies without a restart.
 `jezero check-config` reports which referenced variables are set, never their values. The
 result is a config file that can be shared, reviewed and versioned without leaking
 anything. [Deploy Jezero](../how-to/deploy.md) shows where the variables go.
@@ -173,10 +188,16 @@ anything. [Deploy Jezero](../how-to/deploy.md) shows where the variables go.
 ## Authentication and the loopback rule
 
 `server.require_auth` is on by default. Turning it off is allowed only when `server.host`
-is a loopback address (`localhost`, `127.0.0.1` or another `127.x` address, `::1`): the
-config is refused otherwise. Without auth every MCP caller is treated as one client,
-`local`, that reads every source, and the overview endpoint is open too. Uploads still
-need a key.
+is a loopback address (`localhost`, `127.0.0.1` or another `127.x` address, `::1`) and
+neither `public_url` nor `allowed_hosts` is set: the config is refused otherwise. Without
+auth every MCP caller is treated as one client, `local`, that reads every source, and the
+overview endpoint is open too. Uploads still need a key.
+
+> [!IMPORTANT]
+> A reverse proxy forwards its traffic from loopback. With `public_url` or
+> `allowed_hosts` set, a loopback server is reachable from wherever the proxy is, so
+> `require_auth = false` there would open the whole library to anyone who reaches the
+> proxy. Jezero refuses that combination when the config loads.
 
 The default host is `127.0.0.1`. Jezero does not terminate TLS. To reach it from other
 computers, put a reverse proxy with TLS in front of it, or bind it to an address on a
@@ -192,7 +213,8 @@ if it were its own site. The defence is to refuse requests whose `Host` header (
 `Origin`, when a browser sends one) is not a name the server expects.
 
 Jezero turns on the MCP SDK's DNS-rebinding protection and applies the same check to
-every route: MCP, the inbox, the overview endpoint and the bundle. The list is always
+every route, in one middleware that runs before anything else: MCP, the OAuth metadata,
+the inbox, the overview endpoint, the bundle and unknown paths. The list is always
 explicit, never left to the SDK's defaults, which cover only `127.0.0.1`, `localhost`
 and `[::1]` and would leave another loopback address (`127.0.0.2`) or a wildcard bind
 unchecked:
@@ -224,6 +246,10 @@ the summariser cannot call anything, and the MCP server cannot write.
 
 Queries cannot inject either. Every search term is quoted before it reaches FTS5, so
 operators in a query are searched as text, and the SQL uses placeholders for every value.
+Their cost is bounded too: control characters are dropped, and a query keeps at most
+4096 characters, 64 distinct terms and 100 characters per term. Arguments out of range
+(an `item_id` beyond what SQLite stores, a date with no UTC equivalent) get a clear tool
+error.
 See [How the query is built](search.md#how-the-query-is-built).
 
 ## What the plugins send, and when
@@ -293,8 +319,10 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md).
   is not acceptable, point `summarizer.base_url` at a model you run yourself.
 - **An agent that ignores its instructions.** Trust levels and the protocol are advice.
 - **Traffic without TLS.** Jezero relies on a proxy or a private network for encryption.
-- **Abuse of resources.** Apart from the upload size limit, there are no quotas or rate
-  limits.
+- **Abuse of resources.** Apart from the upload size limit, the optional per-device
+  quota (`inbox.max_device_mb`) and the bounds on queries, there are no quotas or rate
+  limits. On the ingestion side, the Codex connector skips any line over 16 MiB and stops
+  reading a rollout after 512 MiB, with a warning, so one file cannot exhaust memory.
 - **Your own user account on a device.** The device key is a file readable by your user;
   any program running as you can read it.
 

@@ -25,14 +25,17 @@ check, the plugin bundle, the dashboard counts and the OAuth metadata. Each is s
 
 The inbox routes always need a key, even with `[server].require_auth = false`.
 
-Every route, MCP included, checks the `Host` and `Origin` headers first, with the rules of
-[the MCP endpoint](mcp-tools.md#authentication): an unknown host gets HTTP 421 with the
-plain-text body `Invalid Host header`, an unknown browser origin HTTP 403 `Invalid Origin
-header`, before the key is looked at. A computer that reaches the server by a name or
+Every route, MCP and the OAuth metadata included, checks the `Host` and `Origin` headers
+first, with the rules of [the MCP endpoint](mcp-tools.md#authentication): an unknown host
+gets HTTP 421 with the plain-text body `Invalid Host header`, an unknown browser origin
+HTTP 403 `Invalid Origin header`, before the key is looked at. So a request with no key and
+an unknown host gets 421, not 401. An unknown path behind an unknown host also gets 421. A computer that reaches the server by a name or
 address missing from `public_url` and `allowed_hosts` is refused on every route.
 
-Keys are read again from `jezero.toml` within a second of a change, so a key approved,
-rotated or revoked with [`jezero device`](cli.md#jezero-device) needs no restart.
+Keys are read again from `jezero.toml` (and `token_env` values from the `.env` next to it)
+within a second of a change, so a key approved, rotated or revoked with [`jezero
+device`](cli.md#jezero-device) needs no restart. If the file does not load, only the
+clients whose `[[clients]]` entry is unchanged keep working until it does.
 
 ## Check a device key
 
@@ -98,7 +101,13 @@ behind the connector's cursor. With `X-Jezero-Project`, the value is written to
 existing `<file>.project` is removed.
 
 The size limit is `[inbox].max_mb` (default 64) × 1024 × 1024 bytes, measured after
-decompression.
+decompression. A Codex `.jsonl.zst` file is stored compressed, as sent, after the server
+decompressed it in chunks and checked that it stays within the same limit; bytes that are
+not valid zstd are stored as sent, and the connector skips them.
+
+With `[inbox].max_device_mb` set, an upload that would take the device's folder past that
+many MB (the file it replaces does not count) is refused with 507. Two uploads of one
+device at the same moment may both pass, so the folder can end one file over.
 
 ```bash
 gzip -c ~/.claude/projects/-home-me-projects-billing/4b1c2d9e.jsonl | \
@@ -116,7 +125,8 @@ You should see:
 {"ok": true, "device": "laptop", "bytes": 48213}
 ```
 
-`bytes` is the size of the stored file, after decompression.
+`bytes` is the size of the stored file, after the `Content-Encoding` is removed (a
+`.jsonl.zst` file stays compressed).
 
 | Status | Error | When |
 |---|---|---|
@@ -131,12 +141,17 @@ You should see:
 | 401 | `unknown token` | The key matches no client. |
 | 403 | `this key may not upload` | The client has `upload = false`. |
 | 403 | `bad device name` | The client's name is not a valid device name. |
-| 413 | `file too large` | Declared, received or decompressed size above the limit. |
+| 413 | `file too large` | Declared, received or decompressed size above the limit, including what a `.jsonl.zst` file expands to. |
 | 415 | `unsupported Content-Encoding 'br'; use gzip, zstd or none` | Any encoding other than `gzip`, `zstd` or `identity`. |
 | 421 | `Invalid Host header` (plain text) | The `Host` header is not an allowed host: see [Routes](#routes). |
+| 507 | `device inbox full: the server's inbox.max_device_mb is reached` | Only with `[inbox].max_device_mb`. |
 
 The checks run in this order: host, key, agent and path, declared size, received size,
-body decoding, empty body, project.
+body decoding, decompressed size of a `.jsonl.zst` file, empty body, project, device
+quota.
+
+A 507 is a server error to the client core, so it keeps the file queued and sends it again
+once the admin raises the quota or frees space.
 
 > [!NOTE]
 > The client core keeps the whole queue after a 401 or 403 (the key may be approved for
@@ -231,7 +246,8 @@ GET /.well-known/oauth-protected-resource/mcp
 ```
 
 Served by the MCP library when `require_auth = true`, and named in the
-`WWW-Authenticate` header of a 401 from `/mcp`. The path ends with `[server].path`.
+`WWW-Authenticate` header of a 401 from `/mcp`. Like every route, it checks `Host` and
+`Origin` first (421, 403). The path ends with `[server].path`.
 Jezero runs no authorization server: keys are static and come from `[[clients]]`, so MCP
 clients must be given the key as a header.
 

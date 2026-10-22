@@ -20,6 +20,7 @@ folders (a config folder copied to make another) is one item: the newest copy wi
 from __future__ import annotations
 
 import fnmatch
+import functools
 import glob
 import json
 import os
@@ -36,7 +37,9 @@ from .base import (
     BuildContext,
     ConnectorType,
     RawDoc,
+    batch_full,
     glob_base,
+    read_or_skip,
     require_dir,
     segment,
     truncate_middle,
@@ -151,19 +154,30 @@ class ClaudeCodeConnector:
             (c for c in candidates if c[0] <= settled_before),
             reverse=sample is not None,
         )
-        if sample is not None:
-            ready = ready[:sample]
-        elif limit is not None:
-            ready = ready[:limit]
         docs: list[RawDoc] = []
-        for _, path in ready:
-            docs.extend(self._session_docs(path, self._config_dir(roots[path])))
-        next_cursor = repr(max(m for m, _ in ready)) if sample is None and ready else None
-        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
+        processed: list[float] = []
+        skipped: list[str] = []
+        for mtime, path in ready:
+            last = processed[-1] if processed else None
+            if batch_full(len(processed), mtime, last, limit=limit, sample=sample):
+                break
+            root = roots[path]
+            read = functools.partial(
+                self._session_docs,
+                path,
+                self._config_dir(root),
+                subagent=_is_subagent(path.relative_to(root).parts),
+            )
+            docs.extend(read_or_skip(str(path), skipped, read) or [])
+            processed.append(mtime)
+        next_cursor = repr(max(processed)) if sample is None and processed else None
+        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred, skipped=skipped)
 
     # -- parsing -----------------------------------------------------------------------
 
-    def _session_docs(self, path: Path, config_dir: str | None = None) -> list[RawDoc]:
+    def _session_docs(
+        self, path: Path, config_dir: str | None = None, *, subagent: bool = False
+    ) -> list[RawDoc]:
         blocks: list[tuple[int, float, str]] = []
         title: str | None = None
         session_id = path.stem
@@ -209,6 +223,9 @@ class ClaudeCodeConnector:
         if sum(len(b[2]) for b in blocks) < self.min_chars:
             return []  # trivial sessions (a single slash command, "hi") are not worth a call
         project = self.rules.project_for(cwd, session_file=path) or self.default_project
+        # A sub-agent transcript carries its parent's sessionId on every record: its own
+        # unit is `<parent>/<file>`, so its ids never collide with (or prune) the parent's.
+        unit = f"{session_id}/{path.stem}" if subagent and session_id != path.stem else session_id
         parts = segment(blocks, self.max_segment_chars)
         docs = []
         for number, part in enumerate(parts, 1):
@@ -217,21 +234,22 @@ class ClaudeCodeConnector:
                 part_title = f"{part_title} (part {number}/{len(parts)})"
             docs.append(
                 RawDoc(
-                    external_id=f"{session_id}#{part[0][0]}",
+                    external_id=f"{unit}#{part[0][0]}",
                     occurred_at=datetime.fromtimestamp(part[-1][1], UTC),
                     text="\n".join(b[2] for b in part),
                     title_hint=part_title,
                     project_hint=project,
-                    original_ref=f"claude-code-session:{session_id}",
+                    original_ref=f"claude-code-session:{unit}",
                     meta={
                         "entrypoint": entrypoint or "unknown",
                         **({"config_dir": config_dir} if config_dir else {}),
+                        **({"subagent_of": session_id} if unit != session_id else {}),
                         "part": number,
                         "parts": len(parts),
                     },
                 )
             )
-        return whole_session(session_id, docs)
+        return whole_session(unit, docs)
 
     def _render(self, record: dict[str, Any], stamp: float, tool_names: dict[str, str]) -> str:
         role = record["type"]
@@ -281,6 +299,12 @@ class ClaudeCodeConnector:
             args = (command.group(2) or "").strip()
             text = f"(command) {command.group(1).strip()} {args}".strip()
         return _TAGS.sub("", text).strip()
+
+
+def _is_subagent(parts: tuple[str, ...]) -> bool:
+    """A sub-agent transcript: under a `subagents/` folder (`<sid>/subagents/agent-*.jsonl`)
+    or, in older layouts, an `agent-*.jsonl` next to the main transcripts."""
+    return "subagents" in parts[:-1] or parts[-1].startswith("agent-")
 
 
 def _timestamp(value: Any) -> float | None:

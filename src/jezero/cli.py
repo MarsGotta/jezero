@@ -7,6 +7,7 @@ import hashlib
 import json
 import secrets
 import sys
+import tomllib
 from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -28,6 +29,19 @@ from .ingest import IngestError, import_jsonl
 from .models import Item
 from .redact import Redactor
 from .store import Store, StoreError, sqlite_version
+
+EXIT_LOCKED = 3
+"""`retag` and `resummarize` exit with this when another run holds the lock: nothing was
+done, and a script must not take that for success. (`run` skips quietly with 0, so a timer
+firing during a long backfill is not an error.)"""
+
+
+def _locked(command: str) -> int:
+    print(
+        f"error: another run is in progress; {command} did nothing, try again when it ends",
+        file=sys.stderr,
+    )
+    return EXIT_LOCKED
 
 
 def _store(config: Config) -> Store:
@@ -295,8 +309,7 @@ def cmd_retag(config: Config, args: argparse.Namespace) -> int:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            print(json.dumps({"skipped": "another run is in progress"}))
-            return 0
+            return _locked("retag")
         batch = build_connector(config, conn).collect(ConnectorState(name=conn.name))
         rules = connector_rules(config, conn)
         changed = 0
@@ -400,7 +413,12 @@ def cmd_resummarize(config: Config, args: argparse.Namespace) -> int:
     raw = args.ids.split(",") if args.ids else []
     if args.ids_file:
         raw += Path(args.ids_file).read_text().split()
-    ids = sorted({int(x) for x in raw if x.strip()})
+    words = [x.strip() for x in raw if x.strip()]
+    wrong = [x for x in words if not (x.isascii() and x.isdigit())]
+    if wrong:
+        print(f"error: not an item id: {', '.join(wrong[:5])}", file=sys.stderr)
+        return 2
+    ids = sorted({int(x) for x in words})
     if not ids:
         print("error: no item ids given", file=sys.stderr)
         return 2
@@ -409,8 +427,7 @@ def cmd_resummarize(config: Config, args: argparse.Namespace) -> int:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            print(json.dumps({"skipped": "another run is in progress"}))
-            return 0
+            return _locked("resummarize")
         report = asyncio.run(resummarize_items(config, store, ids))
     print(json.dumps(report.to_dict(), ensure_ascii=False))
     return 1 if report.failed else 0
@@ -906,13 +923,18 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     c.set_defaults(fn=cmd_connector_reset)
 
-    p = sub.add_parser("resummarize", help="summarise stored items again from their original")
+    p = sub.add_parser(
+        "resummarize",
+        help="summarise stored items again from their original (exit 3 if a run holds the lock)",
+    )
     p.add_argument("--ids", help="comma-separated item ids")
     p.add_argument("--ids-file", help="file with item ids, one per line")
     p.set_defaults(fn=cmd_resummarize)
 
     p = sub.add_parser(
-        "retag", help="re-apply the source's project hints and the project aliases, without the LLM"
+        "retag",
+        help="re-apply the source's project hints and the project aliases, without the LLM"
+        " (exit 3 if a run holds the lock)",
     )
     p.add_argument("--connector", required=True, help="connector whose items are retagged")
     p.add_argument("--dry-run", action="store_true", help="count changes without writing")
@@ -954,6 +976,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except ValidationError as exc:
         print(f"invalid config:\n{exc}", file=sys.stderr)
+        return 2
+    except tomllib.TOMLDecodeError as exc:
+        print(f"error: the config is not valid TOML: {exc}", file=sys.stderr)
         return 2
 
 

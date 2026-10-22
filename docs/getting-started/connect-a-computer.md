@@ -33,7 +33,7 @@ python3 scripts/build_clients.py
 You should see:
 
 ```text
-built /home/me/jezero/dist/client, /home/me/jezero/dist/jezero-client.tar.gz and plugins/ (version 0.5.1)
+built /home/me/jezero/dist/client, /home/me/jezero/dist/jezero-client.tar.gz and plugins/ (version 0.5.2)
 ```
 
 The server offers the file at `/client/jezero-client.tar.gz` without a key: it is the same
@@ -53,7 +53,7 @@ python3 ~/.jezero-src/jezero-client/jezero_client.py --version
 You should see:
 
 ```text
-0.5.1
+0.5.2
 ```
 
 `jezero_client.py` is the [client core](../glossary.md#client-core): one Python file with

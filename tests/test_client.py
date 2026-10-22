@@ -27,6 +27,9 @@ DEVICE_TOKEN = "client-test-device-token"
 
 def load_core(home: Path, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.setenv("JEZERO_CLIENT_HOME", str(home))
+    # Transcripts are only uploaded from the agent's own store: point Claude Code's at
+    # a `claude` folder next to the client home.
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home.parent / "claude"))
     spec = importlib.util.spec_from_file_location(f"jezero_client_{id(home)}", CORE)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -126,7 +129,7 @@ def test_hooks_context_and_upload(server, tmp_path: Path, monkeypatch: pytest.Mo
     assert "Uploader retry loop fixed" in first
     assert core.hook("user-prompt", "claude-code", prompt) == ""  # only the first prompt
 
-    transcript = tmp_path / ".claude" / "projects" / "-w-projects-demo" / "s1.jsonl"
+    transcript = tmp_path / "claude" / "projects" / "-w-projects-demo" / "s1.jsonl"
     transcript.parent.mkdir(parents=True)
     transcript.write_text('{"type":"user"}\n')
     end = {"session_id": "s1", "transcript_path": str(transcript), "cwd": "/w/projects/demo"}
@@ -145,7 +148,7 @@ def test_offline_keeps_the_queue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         s.bind(("127.0.0.1", 0))
         dead = s.getsockname()[1]
     configure(core, f"http://127.0.0.1:{dead}")
-    transcript = tmp_path / "projects" / "-w" / "s2.jsonl"
+    transcript = tmp_path / "claude" / "projects" / "-w" / "s2.jsonl"
     transcript.parent.mkdir(parents=True)
     transcript.write_text("{}\n")
     core.hook("stop", "claude-code", {"session_id": "s2", "transcript_path": str(transcript)})
@@ -183,7 +186,7 @@ def test_certificate_failure_exports_system_roots_and_retries(
         return Response()
 
     exported: list[bool] = []
-    monkeypatch.setattr(core.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(core, "_open", fake_urlopen)
     monkeypatch.setattr(core, "export_system_roots", lambda: exported.append(True) or True)
     assert core._http("GET", "https://lib.example/inbox/v1/ping", "t") == (200, b"{}")
     assert len(calls) == 2 and exported == [True]

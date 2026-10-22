@@ -83,6 +83,7 @@ def load_cases(path: Path) -> tuple[list[Case], dict[str, Any]]:
     unknown = set(defaults) - {"k", "sources", "fail_under"}
     if unknown:
         raise EvalFileError(f"[defaults]: unknown keys {sorted(unknown)}")
+    _check_defaults(defaults)
     cases: list[Case] = []
     seen: set[str] = set()
     for n, raw in enumerate(data.get("case") or [], start=1):
@@ -98,21 +99,53 @@ def load_cases(path: Path) -> tuple[list[Case], dict[str, Any]]:
             raise EvalFileError(f"{where}: the id is used twice")
         seen.add(raw["id"])
         expect = raw["expect"]
-        if (
-            not isinstance(expect, list)
-            or not expect
-            or not all(isinstance(i, int) for i in expect)
-        ):
+        if not isinstance(expect, list) or not expect or not all(_is_int(i) for i in expect):
             raise EvalFileError(f"{where}: expect must be a non-empty list of item ids")
         kind = raw.get("kind", "search")
         if kind not in KINDS:
             raise EvalFileError(f"{where}: kind must be one of {', '.join(KINDS)}")
         if kind == "later" and not isinstance(raw.get("item"), int):
             raise EvalFileError(f"{where}: a later case needs item = <id of the old state>")
+        _check_case(where, raw)
         cases.append(Case(**raw))
     if not cases:
         raise EvalFileError(f"{path}: no [[case]] entries")
     return cases, defaults
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _string_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(v, str) and v for v in value)
+
+
+def _check_defaults(defaults: dict[str, Any]) -> None:
+    # A string where a list is expected would be read letter by letter, or (as a glob such
+    # as "agent-*") widen the scope: every type is checked before anything runs.
+    if "sources" in defaults and not _string_list(defaults["sources"]):
+        raise EvalFileError('[defaults]: sources must be a list of strings, like ["agent-*"]')
+    if "k" in defaults and not (_is_int(defaults["k"]) and defaults["k"] >= 1):
+        raise EvalFileError("[defaults]: k must be a whole number of at least 1")
+    if "fail_under" in defaults:
+        share = defaults["fail_under"]
+        if not (isinstance(share, int | float) and not isinstance(share, bool)) or not (
+            0 <= share <= 1
+        ):
+            raise EvalFileError("[defaults]: fail_under must be a number from 0 to 1")
+
+
+def _check_case(where: str, raw: dict[str, Any]) -> None:
+    if not isinstance(raw["id"], str) or not raw["id"]:
+        raise EvalFileError(f"{where}: id must be a non-empty string")
+    for key in ("question", "query", "project", "note", "kind"):
+        if key in raw and not isinstance(raw[key], str):
+            raise EvalFileError(f"{where}: {key} must be a string")
+    if "sources" in raw and not _string_list(raw["sources"]):
+        raise EvalFileError(f'{where}: sources must be a list of strings, like ["agent-*"]')
+    if "item" in raw and not _is_int(raw["item"]):
+        raise EvalFileError(f"{where}: item must be an item id")
 
 
 def run_cases(

@@ -92,7 +92,7 @@ The MCP server and its HTTP routes.
 | `path` | string | `"/mcp"` | URL path of the MCP endpoint. |
 | `public_url` | string (optional) | none | External URL when served behind a reverse proxy, e.g. https://library.example.org/mcp |
 | `allowed_hosts` | list of string | empty | Extra Host header values accepted (DNS-rebinding protection). Derived from public_url. |
-| `require_auth` | boolean | `true` | Ask every request for a client key. May be turned off only on a loopback host. |
+| `require_auth` | boolean | `true` | Ask every request for a client key. May be turned off only on a loopback host, and never together with public_url or allowed_hosts. |
 | `client_bundle` | path (optional) | `"dist/jezero-client.tar.gz"` | Plugin bundle offered at /client/jezero-client.tar.gz (public code, no auth). |
 
 ## clients
@@ -146,7 +146,8 @@ Where devices deliver raw session files (see `jezero.inbox`).
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `dir` | path | `"data/inbox"` | Folder for uploads, one subfolder per device. Relative to the config file. |
-| `max_mb` | number (> 0) | `64.0` | Largest accepted file, after decompression. |
+| `max_mb` | number (> 0) | `64.0` | Largest accepted file, after decompression (a `.zst` file is checked decompressed). |
+| `max_device_mb` | number (optional) (> 0) | none | Most space one device's inbox folder may use; uploads beyond it get 507. Default: no limit. |
 
 ## projects
 

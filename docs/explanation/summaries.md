@@ -59,9 +59,11 @@ Before the document, the prompt may carry a few lines of context:
 
 The model's answer is checked loosely, because cheap models vary. Atoms flattened to
 `"kind: text"` strings are recovered, an unknown kind becomes `fact`, and lists returned
-as JSON-encoded strings are decoded. An answer without a title or a summary is an error:
-that document counts as failed, the connector's cursor does not move, and the next run
-tries it again.
+as JSON-encoded strings are decoded. An answer without a title or a summary is an error,
+and so is an answer of the wrong shape (an empty `content`, a proxy's HTML page instead of
+JSON): that document counts as failed, the connector's cursor does not move, and the next
+run tries it again. The other documents of the run are still stored, so the calls already
+paid for are not lost.
 
 ## Atoms
 

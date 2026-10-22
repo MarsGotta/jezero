@@ -15,6 +15,7 @@ agent connectors) skips sessions whose dialogue is shorter, such as a lone greet
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -33,6 +34,8 @@ from .base import (
     BuildContext,
     ConnectorType,
     RawDoc,
+    batch_full,
+    read_or_skip,
     require_dir,
     require_file,
     segment,
@@ -113,19 +116,24 @@ class HermesConnector:
             )
             docs: list[RawDoc] = []
             processed: list[float] = []
+            skipped: list[str] = []
             taken = 0
             for session in ready:
-                if (sample is not None and taken >= sample) or (
-                    limit is not None and taken >= limit
-                ):
+                activity = float(session["activity"])
+                last = processed[-1] if processed else None
+                if batch_full(taken, activity, last, limit=limit, sample=sample):
                     break
-                session_docs = self._session_docs(dict(session), self._rows(con, session["id"]))
-                processed.append(float(session["activity"]))
+                read = functools.partial(self._db_session_docs, con, session)
+                session_docs = read_or_skip(f"session {session['id']}", skipped, read) or []
+                processed.append(activity)
                 docs.extend(session_docs)
                 # A sample counts sessions that produced something; trivial ones are skipped.
                 taken += 1 if (session_docs or sample is None) else 0
         next_cursor = repr(max(processed)) if sample is None and processed else None
-        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
+        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred, skipped=skipped)
+
+    def _db_session_docs(self, con: sqlite3.Connection, session: sqlite3.Row) -> list[RawDoc]:
+        return self._session_docs(dict(session), self._rows(con, session["id"]))
 
     def _collect_exports(
         self, state: ConnectorState, *, limit: int | None, sample: int | None, now: float
@@ -150,16 +158,20 @@ class HermesConnector:
         )
         docs: list[RawDoc] = []
         processed: list[float] = []
+        skipped: list[str] = []
         taken = 0
         for mtime, path in ready:
-            if (sample is not None and taken >= sample) or (limit is not None and taken >= limit):
+            last = processed[-1] if processed else None
+            if batch_full(taken, mtime, last, limit=limit, sample=sample):
                 break
             processed.append(mtime)
-            session_docs = self._export_docs(path)
-            docs.extend(session_docs)
+            session_docs = read_or_skip(
+                str(path), skipped, functools.partial(self._export_docs, path)
+            )
+            docs.extend(session_docs or [])
             taken += 1 if (session_docs or sample is None) else 0
         next_cursor = repr(max(processed)) if sample is None and processed else None
-        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
+        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred, skipped=skipped)
 
     def _export_docs(self, path: Path) -> list[RawDoc]:
         try:

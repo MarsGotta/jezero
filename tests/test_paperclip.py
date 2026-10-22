@@ -123,7 +123,7 @@ def test_issue_becomes_one_doc_with_thread_documents_and_answers() -> None:
     assert doc.external_id == "ACME-1#0"
     assert doc.title_hint == "ACME-1 Ship the checkout"
     assert doc.project_hint == "shop"
-    assert doc.original_ref == "paperclip-issue:ACME-1"
+    assert doc.original_ref == "paperclip-issue:co-1/ACME-1"
     text = doc.text
     assert "assignee: Builder" in text and "created by: Owner" in text
     assert text.index("Plan: build.yml") < text.index("PR #6") < text.index("Owner: Approved")

@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- Security review before the first release. Server: `require_auth = false` is refused
+  together with `public_url` or `allowed_hosts`; Host and Origin are checked before the
+  key on every route (a bad host gets 421); `.jsonl.zst` uploads are measured
+  decompressed against `inbox.max_mb`, and the Codex connector reads rollouts in bounded
+  chunks; `token_env` values changed in `.env` apply without a restart; a config that
+  fails to load keeps only unchanged clients; `jezero device` commands refuse to
+  overwrite a file changed after they read it; search queries are bounded (4096
+  characters, 64 terms, 100 characters per term); new optional `[inbox] max_device_mb`.
+- Client 0.5.2: never follows HTTP redirects (they could carry the key to another host
+  or to plain HTTP); `init` refuses `http://` for other computers unless
+  `--insecure-http`; one bad file no longer stops the upload queue; files over
+  `max_upload_mb` are rejected without being read into memory; only the agent's own
+  session files are uploaded (no symbolic links, nothing outside its folder); `setup
+  --agent codex` keeps line endings and a backup, writes atomically and refuses entries
+  it cannot edit safely; `setup --agent antigravity` points the plugin at its core by
+  full path; private file modes (0700/0600), uploaded exports deleted, locked
+  `state.json`, and the stdio bridge answers every request with valid JSON-RPC.
+- Core: with `include_subagents`, sub-agent transcripts are their own items and no
+  longer prune the parent session; one unreadable session file is skipped and reported
+  instead of blocking its source; a malformed summarizer answer fails only that
+  document; redaction covers Telegram, Slack and Discord webhooks, `Authorization` and
+  `Cookie` headers, Groq, xAI, SendGrid, PyPI and Stripe webhook keys, PGP and cut-short
+  private keys, AWS secret keys, `mysql -p`, numeric and dotted passwords and Spanish key
+  names, and titles and context sent to the model are redacted too; `run --limit` no
+  longer skips sessions sharing a timestamp; Paperclip refs include the company;
+  `jezero eval` checks the types in question files; clean `error:` messages for a broken
+  config and bad `--ids`; `retag` and `resummarize` exit 3 when another run holds the
+  lock; accented project folder names count.
 - Project skeleton: configuration file with validation and env-only secrets.
 - SQLite + FTS5 store (trigram tokenizer, accent-insensitive) with BM25 ranking and a
   recency boost.

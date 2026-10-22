@@ -10,6 +10,7 @@ The large `event` table is never touched.
 from __future__ import annotations
 
 import fnmatch
+import functools
 import json
 import os
 import sqlite3
@@ -27,6 +28,8 @@ from .base import (
     ConnectorType,
     PromptCleaner,
     RawDoc,
+    batch_full,
+    read_or_skip,
     require_dir,
     require_file,
     segment,
@@ -102,20 +105,24 @@ class OpenCodeConnector:
             )
             docs: list[RawDoc] = []
             processed: list[float] = []
+            skipped: list[str] = []
             taken = 0
             for row in ready:
-                if (sample is not None and taken >= sample) or (
-                    limit is not None and taken >= limit
-                ):
+                last = processed[-1] if processed else None
+                if batch_full(taken, float(row[5]), last, limit=limit, sample=sample):
                     break
-                session_docs, counted = self._session_docs(db, row)
+                read = functools.partial(self._session_docs, db, row)
+                session_docs, counted = read_or_skip(f"session {row[0]}", skipped, read) or (
+                    [],
+                    False,
+                )
                 processed.append(float(row[5]))
                 docs.extend(session_docs)
                 taken += 1 if (counted or sample is None) else 0
         finally:
             db.close()
         next_cursor = repr(max(processed)) if sample is None and processed else None
-        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
+        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred, skipped=skipped)
 
     def _collect_exports(
         self, state: ConnectorState, *, limit: int | None, sample: int | None, now: float
@@ -138,41 +145,48 @@ class OpenCodeConnector:
         )
         docs: list[RawDoc] = []
         processed: list[float] = []
+        skipped: list[str] = []
         taken = 0
         for mtime, path in ready:
-            if (sample is not None and taken >= sample) or (limit is not None and taken >= limit):
+            last = processed[-1] if processed else None
+            if batch_full(taken, mtime, last, limit=limit, sample=sample):
                 break
-            try:
-                export = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                processed.append(mtime)
-                continue
-            session = export.get("session") or {}
-            roles: dict[str, tuple[str, dict[str, Any]]] = {}
-            parts: list[tuple[str, float, dict[str, Any]]] = []
-            for message in export.get("messages") or []:
-                info = message.get("info") or {}
-                msg_id = str(info.get("id") or "")
-                roles[msg_id] = (str(info.get("role") or "?"), info)
-                msg_time = float((info.get("time") or {}).get("created") or 0)
-                for part in message.get("parts") or []:
-                    stamp = (part.get("time") or {}).get("start") or msg_time
-                    parts.append((msg_id, float(stamp), part))
-            parts.sort(key=lambda p: p[1])
-            session_docs, counted = self._build_docs(
-                str(session.get("id") or path.stem),
-                session.get("parentID"),
-                session.get("directory"),
-                session.get("title"),
-                roles,
-                parts,
-                session_file=path,
-            )
+            read = functools.partial(self._export_docs, path)
+            session_docs, counted = read_or_skip(str(path), skipped, read) or ([], False)
             processed.append(mtime)
             docs.extend(session_docs)
             taken += 1 if (counted or sample is None) else 0
         next_cursor = repr(max(processed)) if sample is None and processed else None
-        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
+        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred, skipped=skipped)
+
+    def _export_docs(self, path: Path) -> tuple[list[RawDoc], bool]:
+        try:
+            export = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return [], False
+        if not isinstance(export, dict):
+            raise ValueError(f"expected a JSON object, got {type(export).__name__}")
+        session = export.get("session") or {}
+        roles: dict[str, tuple[str, dict[str, Any]]] = {}
+        parts: list[tuple[str, float, dict[str, Any]]] = []
+        for message in export.get("messages") or []:
+            info = message.get("info") or {}
+            msg_id = str(info.get("id") or "")
+            roles[msg_id] = (str(info.get("role") or "?"), info)
+            msg_time = float((info.get("time") or {}).get("created") or 0)
+            for part in message.get("parts") or []:
+                stamp = (part.get("time") or {}).get("start") or msg_time
+                parts.append((msg_id, float(stamp), part))
+        parts.sort(key=lambda p: p[1])
+        return self._build_docs(
+            str(session.get("id") or path.stem),
+            session.get("parentID"),
+            session.get("directory"),
+            session.get("title"),
+            roles,
+            parts,
+            session_file=path,
+        )
 
     def _session_docs(self, db: sqlite3.Connection, row: tuple) -> tuple[list[RawDoc], bool]:
         session_id, parent_id, directory, title, _, _ = row

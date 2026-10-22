@@ -1,5 +1,5 @@
 name: jezero
-version: 0.5.1
+version: 0.5.2
 description: "Jezero: shared read-only memory of past agent work. Search tools, related past work on the first turn, and upload of this computer's Hermes sessions to your Jezero server."
 author: Jezero contributors
 license: Apache-2.0

@@ -89,7 +89,9 @@ def test_hooks_end_to_end(server, tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     url, inbox = server
     core = load_core(tmp_path / "jz", monkeypatch)
     configure(core, url)
-    transcript = write_transcript(tmp_path / "agy", "the uploader retry backoff is broken")
+    monkeypatch.setenv("HOME", str(tmp_path / "user"))  # transcripts: ~/.gemini/<app>/brain
+    agy = tmp_path / "user" / ".gemini" / "antigravity-cli"
+    transcript = write_transcript(agy, "the uploader retry backoff is broken")
     common = {
         "conversationId": CONVERSATION,
         "workspacePaths": ["/home/me/projects/atlas"],

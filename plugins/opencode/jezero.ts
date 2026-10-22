@@ -15,7 +15,7 @@
  */
 import type { Plugin } from "@opencode-ai/plugin"
 import { spawn, spawnSync } from "node:child_process"
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -134,9 +134,14 @@ export const Jezero: Plugin = async ({ client, directory }) => {
       try {
         const session = await client.session.get({ path: { id } })
         const messages = await client.session.messages({ path: { id } })
-        mkdirSync(EXPORTS, { recursive: true })
-        const file = join(EXPORTS, `${id}.json`)
-        writeFileSync(file, JSON.stringify({ session: session.data, messages: messages.data }))
+        // Only this user may read the exports (copies of sessions): folders 0700, files 0600.
+        mkdirSync(EXPORTS, { recursive: true, mode: 0o700 })
+        for (const dir of [HOME, join(HOME, "spool"), EXPORTS]) chmodSync(dir, 0o700)
+        const file = join(EXPORTS, `${id.replace(/[^A-Za-z0-9._-]/g, "_")}.json`)
+        writeFileSync(file, JSON.stringify({ session: session.data, messages: messages.data }), {
+          mode: 0o600,
+        })
+        chmodSync(file, 0o600)
         const child = spawn("python3", [CORE, "hook", "session-end", "--agent", "opencode"], {
           detached: true,
           stdio: ["pipe", "ignore", "ignore"],

@@ -136,12 +136,12 @@ rules to what is already stored.
 
 | Connector type | `original_ref` |
 |---|---|
-| `claude_code` | `claude-code-session:<session id>` |
+| `claude_code` | `claude-code-session:<session id>`; a sub-agent transcript (with `include_subagents`): `claude-code-session:<session id>/<agent file>` |
 | `codex` | `codex-session:<session id>` |
 | `opencode` | `opencode-session:<session id>` |
 | `hermes` | `hermes-session:<session id>` |
 | `antigravity` | `antigravity-conversation:<conversation id>` |
-| `paperclip` | `paperclip-issue:<identifier>` |
+| `paperclip` | `paperclip-issue:<company id>/<identifier>` (items stored before 0.1.0: `paperclip-issue:<identifier>`) |
 | `jsonl` | the record's `original_ref`, or null |
 
 All the segments of one session share its `original_ref`.

@@ -11,6 +11,7 @@ whole transcripts) are skipped unless `include_subagents` is set.
 
 from __future__ import annotations
 
+import functools
 import glob
 import json
 import os
@@ -30,13 +31,17 @@ from .base import (
     ConnectorType,
     PromptCleaner,
     RawDoc,
+    batch_full,
     glob_base,
+    read_or_skip,
     require_dir,
     segment,
     whole_session,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from ..config import ConnectorConfig
 
 # Text blocks that Codex injects into "user" messages.
@@ -124,15 +129,18 @@ class CodexConnector:
         docs: list[RawDoc] = []
         taken = 0
         processed: list[float] = []
+        skipped: list[str] = []
         for mtime, path in ready:
-            if (sample is not None and taken >= sample) or (limit is not None and taken >= limit):
+            last = processed[-1] if processed else None
+            if batch_full(taken, mtime, last, limit=limit, sample=sample):
                 break
-            session_docs, counted = self._session_docs(path, titles)
+            read = functools.partial(self._session_docs, path, titles)
+            session_docs, counted = read_or_skip(str(path), skipped, read) or ([], False)
             processed.append(mtime)
             docs.extend(session_docs)
             taken += 1 if (counted or sample is None) else 0
         next_cursor = repr(max(processed)) if sample is None and processed else None
-        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
+        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred, skipped=skipped)
 
     def _roots(self) -> list[Path]:
         if self.is_glob:
@@ -312,17 +320,104 @@ def _unescape(value: str) -> str:
         return value
 
 
-def open_text(path: Path) -> IO[str]:
-    """Open a rollout as text; newer Codex builds compress them (`.jsonl.zst`)."""
-    if path.suffix != ".zst":
-        return path.open(encoding="utf-8", errors="replace")
-    import io
+MAX_LINE_BYTES = 16 * 1024 * 1024
+"""A rollout line longer than this is skipped with a warning, never held whole."""
+MAX_ROLLOUT_BYTES = 512 * 1024 * 1024
+"""Reading one rollout stops with a warning after this many (decompressed) bytes."""
 
-    import zstandard
+_READ_CHUNK = 1 << 16
 
-    raw = path.open("rb")
-    stream = zstandard.ZstdDecompressor().stream_reader(raw, closefd=True)
-    return io.TextIOWrapper(stream, encoding="utf-8", errors="replace")
+
+class BoundedLines:
+    """The lines of a rollout as text, read in chunks with bounded memory.
+
+    A line longer than `max_line` is skipped (it comes out as an empty string, so line
+    numbers stay the same) and reading stops after `max_total` bytes: a small `.zst` that
+    expands to gigabytes, or one gigantic line, cannot exhaust the memory of `jezero run`.
+    """
+
+    def __init__(self, raw: IO[bytes], path: Path, *, max_line: int, max_total: int) -> None:
+        self._raw = raw
+        self._path = path
+        self._max_line = max_line
+        self._max_total = max_total
+        self._lines = self._generate()
+
+    def __enter__(self) -> BoundedLines:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        self._raw.close()
+
+    def __iter__(self) -> BoundedLines:
+        return self
+
+    def __next__(self) -> str:
+        return next(self._lines)
+
+    def readline(self) -> str:
+        return next(self._lines, "")
+
+    def _warn(self, message: str, *args: object) -> None:
+        import logging
+
+        logging.getLogger(__name__).warning("%s: " + message, self._path, *args)
+
+    def _generate(self) -> Iterator[str]:
+        buffer = bytearray()
+        skipping = False
+        total = 0
+        while True:
+            chunk = self._raw.read(_READ_CHUNK)
+            if not chunk:
+                break
+            total += len(chunk)
+            over = total > self._max_total
+            if over:
+                chunk = chunk[: len(chunk) - (total - self._max_total)]
+            start = 0
+            while True:
+                end = chunk.find(b"\n", start)
+                piece = chunk[start:] if end < 0 else chunk[start : end + 1]
+                if not skipping and len(buffer) + len(piece) > self._max_line:
+                    self._warn("skipped a line longer than %d bytes", self._max_line)
+                    buffer.clear()
+                    skipping = True
+                if not skipping:
+                    buffer += piece
+                if end < 0:
+                    break
+                if skipping:
+                    skipping = False
+                    yield ""
+                else:
+                    line = buffer.decode("utf-8", errors="replace")
+                    buffer.clear()
+                    yield line
+                start = end + 1
+            if over:
+                self._warn("stopped reading after %d bytes (the rest is ignored)", self._max_total)
+                return  # a cut last line is dropped, not parsed
+        if skipping:
+            yield ""
+        elif buffer:
+            yield buffer.decode("utf-8", errors="replace")
+
+
+def open_text(path: Path) -> BoundedLines:
+    """Open a rollout as lines of text; newer Codex builds compress them (`.jsonl.zst`).
+
+    Reads are bounded by `MAX_LINE_BYTES` and `MAX_ROLLOUT_BYTES` (see `BoundedLines`).
+    """
+    raw: IO[bytes] = path.open("rb")
+    if path.suffix == ".zst":
+        import zstandard
+
+        raw = zstandard.ZstdDecompressor().stream_reader(raw, closefd=True)  # type: ignore[assignment]
+    return BoundedLines(raw, path, max_line=MAX_LINE_BYTES, max_total=MAX_ROLLOUT_BYTES)
 
 
 def _build(conn: ConnectorConfig, ctx: BuildContext) -> CodexConnector:

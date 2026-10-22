@@ -109,6 +109,10 @@ Claude Code's configuration never holds the key.
 
    Run it with the same `CLAUDE_CONFIG_DIR` as the agent, if you set one.
 
+   When it removed an old HTTP entry, it also says that copies of Claude Code's config
+   may still hold that key (Claude Code keeps some in `~/.claude/backups`). Treat the key
+   as exposed and [rotate it](devices.md#rotate-a-key).
+
 3. Restart Claude Code.
 
 To give Claude Code the tools without the plugin (no hooks, no upload), run the same
@@ -202,10 +206,18 @@ local bridge, so Codex's `config.toml` never holds the key.
    ```
 
    With the key outside `~/.jezero`, the block also gets
-   `env = { JEZERO_CLIENT_HOME = "..." }`. An old block with `url` and `http_headers`,
-   written by an older client with the key in clear, is replaced:
-   `codex: replaced the old jezero entry in config.toml (it held the key in clear) with
-   the stdio bridge`.
+   `env = { JEZERO_CLIENT_HOME = "..." }`. Line endings stay as they were (LF or CRLF),
+   and the previous file is kept next to it as `config.toml.bak-<time>`.
+
+   An old block with `url`, `http_headers` or `bearer_token`, written by an older client
+   with the key in clear, is replaced with its sub-tables: `codex: replaced the old
+   jezero entry in config.toml (it held the key in clear) with the stdio bridge. The
+   previous file, ..., still holds the key: ...`. Delete that backup once Codex works,
+   and [rotate the key](devices.md#rotate-a-key).
+
+   If `config.toml` defines `jezero` in another form, such as `jezero = { url = ... }`
+   under `[mcp_servers]` or `mcp_servers.jezero.url = ...`, `setup` changes nothing and
+   says so: remove every `mcp_servers.jezero` entry by hand and run it again.
 
 3. Trust the hooks: open Codex, run `/hooks` and trust the Jezero hooks. Codex does not
    run a plugin's hooks until you do, so until then there is no context and no upload.
@@ -337,7 +349,25 @@ The Antigravity plugin brings the MCP server, the hooks and the skill.
 
    The plugin lands in `~/.gemini/config/plugins/jezero`.
 
-2. Allow the tools. Antigravity asks once before the first call of a read-only tool.
+2. Point the plugin at its core by full path:
+
+   ```bash
+   python3 ~/.jezero-src/jezero-client/jezero_client.py setup --agent antigravity
+   ```
+
+   You should see:
+
+   ```text
+   antigravity: plugin in /home/me/.gemini/config/plugins/jezero now runs the core by its full path
+   ```
+
+   The plugin's `hooks.json` and `mcp_config.json` name the core as
+   `./core/jezero_client.py`, and Antigravity's documentation does not say from which
+   folder it runs them. `setup` rewrites both files with the full path, so the hooks and
+   the MCP server work whatever that folder is. Run it again after each install or
+   update of the plugin.
+
+3. Allow the tools. Antigravity asks once before the first call of a read-only tool.
    Headless `agy` runs cannot ask, so add the rule to
    `~/.gemini/antigravity-cli/settings.json`:
 
@@ -375,7 +405,7 @@ Installed plugins:
 python3 ~/.jezero-src/jezero-client/jezero_client.py backfill --agent antigravity
 ```
 
-**Update.** Run the install command again.
+**Update.** Run the install command again, then `setup --agent antigravity`.
 
 **Remove.**
 

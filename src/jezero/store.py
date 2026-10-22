@@ -66,6 +66,17 @@ CREATE TABLE IF NOT EXISTS connector_state (
 """
 
 _TERM_RE = re.compile(r'"([^"]+)"|(\S+)')
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+MAX_QUERY_CHARS = 4096
+"""Longer query text is cut to this many characters before it is split into terms."""
+MAX_QUERY_TERMS = 64
+"""Distinct terms kept from a query; the rest are ignored."""
+MAX_TERM_CHARS = 100
+"""Longer terms (words or quoted phrases) are cut to this many characters."""
+
+SQLITE_MAX_INT = 2**63 - 1
+"""Largest integer SQLite stores: item ids beyond it cannot exist."""
 
 
 class StoreError(RuntimeError):
@@ -93,16 +104,23 @@ def build_match_query(query: str, *, min_term_length: int = 3) -> str | None:
     Every word or "quoted phrase" becomes a quoted FTS5 string, so user input can never
     inject FTS5 operators. Terms are OR-ed: BM25 ranks items matching more terms higher.
     Terms shorter than `min_term_length` are dropped (trigram tokenizers cannot match them).
+
+    The cost is bounded whatever the caller sends: control characters (NUL ends an FTS5
+    string early) become spaces, the text is cut to `MAX_QUERY_CHARS`, each term to
+    `MAX_TERM_CHARS`, and only the first `MAX_QUERY_TERMS` distinct terms are kept.
     """
-    parts: list[str] = []
-    for phrase, word in _TERM_RE.findall(query):
-        term = (phrase or word).strip()
+    text = _CONTROL_RE.sub(" ", query[:MAX_QUERY_CHARS])
+    parts: dict[str, None] = {}
+    for phrase, word in _TERM_RE.findall(text):
+        term = (phrase or word).strip()[:MAX_TERM_CHARS].strip()
         if len(term) < min_term_length:
             continue
-        parts.append('"' + term.replace('"', '""') + '"')
+        parts['"' + term.replace('"', '""') + '"'] = None
+        if len(parts) >= MAX_QUERY_TERMS:
+            break
     if not parts:
         return None
-    return " OR ".join(dict.fromkeys(parts))
+    return " OR ".join(parts)
 
 
 class Store:
@@ -532,6 +550,8 @@ class Store:
         return found | {r[0] for r in rows}
 
     def get(self, item_id: int, *, allowed_sources: Sequence[str] | None = None) -> Item | None:
+        if not -SQLITE_MAX_INT - 1 <= item_id <= SQLITE_MAX_INT:
+            return None  # sqlite3 would raise OverflowError; no such row can exist
         with self._read() as con:
             row = con.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
         if row is None:

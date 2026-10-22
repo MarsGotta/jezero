@@ -11,6 +11,8 @@ import ipaddress
 import os
 import re
 import tomllib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -92,7 +94,8 @@ class ServerConfig(_Strict):
     allowed_hosts: list[str] = Field(default_factory=list)
     """Extra Host header values accepted (DNS-rebinding protection). Derived from public_url."""
     require_auth: bool = True
-    """Ask every request for a client key. May be turned off only on a loopback host."""
+    """Ask every request for a client key. May be turned off only on a loopback host, and
+    never together with public_url or allowed_hosts."""
     client_bundle: Path | None = Path("dist/jezero-client.tar.gz")
     """Plugin bundle offered at /client/jezero-client.tar.gz (public code, no auth)."""
 
@@ -114,8 +117,18 @@ class ServerConfig(_Strict):
 
     @model_validator(mode="after")
     def _no_open_network_server(self) -> ServerConfig:
-        if not self.require_auth and not self.is_loopback:
+        if self.require_auth:
+            return self
+        if not self.is_loopback:
             raise ValueError("require_auth = false is only allowed when host is a loopback address")
+        if self.public_url or self.allowed_hosts:
+            # A reverse proxy forwards from loopback: with public_url or allowed_hosts set,
+            # the whole library would be open to whoever reaches the proxy.
+            raise ValueError(
+                "require_auth = false cannot be combined with public_url or allowed_hosts: "
+                "they publish the server beyond this computer. Set require_auth = true and "
+                "give each caller a [[clients]] key"
+            )
         return self
 
 
@@ -160,7 +173,10 @@ class InboxConfig(_Strict):
     dir: Path = Path("data/inbox")
     """Folder for uploads, one subfolder per device. Relative to the config file."""
     max_mb: float = Field(64.0, gt=0)
-    """Largest accepted file, after decompression."""
+    """Largest accepted file, after decompression (a `.zst` file is checked decompressed)."""
+    max_device_mb: float | None = Field(None, gt=0)
+    """Most space one device's inbox folder may use; uploads beyond it get 507. Default: no
+    limit."""
 
 
 class ConnectorConfig(_Strict):
@@ -355,13 +371,21 @@ def resolve_config_path(explicit: str | os.PathLike[str] | None = None) -> Path:
     return Path.cwd() / DEFAULT_CONFIG_NAME
 
 
+_ENV_FROM_FILE: dict[Path, dict[str, str]] = {}
+"""Per `.env` file, the variables it put into os.environ and the values it gave them."""
+
+
 def load_env_file(path: Path) -> list[str]:
     """Load KEY=VALUE lines from a dotenv-style file into os.environ.
 
-    Existing environment variables win, so a service manager can always override the file.
-    Returns the names that were loaded (never the values).
+    Variables set by anything else win, so a service manager can always override the file.
+    A variable this file set earlier follows the file: loading it again applies a changed
+    value and removes a deleted line, so a running server picks up a rotated or removed
+    `token_env` key when it reloads the config. Returns the names that were set or changed
+    (never the values).
     """
-    loaded: list[str] = []
+    owned = _ENV_FROM_FILE.setdefault(path.resolve(), {})
+    wanted: dict[str, str] = {}
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -370,10 +394,29 @@ def load_env_file(path: Path) -> list[str]:
         key, value = key.strip(), value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
-        if key and value and key not in os.environ:
+        if key and value:
+            wanted[key] = value
+    loaded: list[str] = []
+    for key, value in wanted.items():
+        current = os.environ.get(key)
+        ours = owned.get(key)
+        if current is not None and current != ours:
+            owned.pop(key, None)  # set by something else since: that wins from now on
+            continue
+        if current != value:
             os.environ[key] = value
             loaded.append(key)
+        owned[key] = value
+    for key in [k for k in owned if k not in wanted]:
+        if os.environ.get(key) == owned[key]:
+            del os.environ[key]
+        del owned[key]
     return loaded
+
+
+def env_file_for(config_path: Path) -> Path:
+    """The `.env` file read with a config file."""
+    return config_path.parent / ".env"
 
 
 def load_config(path: str | os.PathLike[str] | None = None) -> Config:
@@ -384,14 +427,61 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
             "or https://github.com/MarsGotta/jezero/blob/main/jezero.example.toml) to "
             f"{DEFAULT_CONFIG_NAME} or set {CONFIG_ENV_VAR}."
         )
-    env_file = config_path.parent / ".env"
+    env_file = env_file_for(config_path)
     if env_file.is_file():
         load_env_file(env_file)
+    elif env_file.resolve() in _ENV_FROM_FILE:
+        # The file was there and is gone: what it set goes with it.
+        load_env_file_removed(env_file)
     with config_path.open("rb") as fh:
         data = tomllib.load(fh)
     config = Config.model_validate(data)
     config.source_file = config_path.resolve()
     return config
+
+
+def load_env_file_removed(path: Path) -> None:
+    """Forget the variables a `.env` file that no longer exists had set."""
+    owned = _ENV_FROM_FILE.pop(path.resolve(), {})
+    for key, value in owned.items():
+        if os.environ.get(key) == value:
+            del os.environ[key]
+
+
+_CLIENT_NAME_RE = re.compile(r"""^\s*name\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)')\s*(?:#.*)?$""")
+
+
+def client_blocks(text: str) -> dict[str, str]:
+    """`[[clients]]` entries of a config text, by name, without parsing it as TOML.
+
+    Used when the file does not load: each entry's text (its own lines and sub-tables,
+    whitespace-normalised, comment lines left out) lets the server keep exactly the
+    clients that were not touched.
+    An entry whose name cannot be read, or a name that appears twice, is left out.
+    """
+    lines = text.splitlines()
+    headers = [(i, m) for i, line in enumerate(lines) if (m := _HEADER_RE.match(line))]
+    found: dict[str, str] = {}
+    twice: set[str] = set()
+    for n, (start, match) in enumerate(headers):
+        table = re.sub(r"\s+", "", match.group(2))
+        if match.group(1) != "[[" or table != "clients":
+            continue
+        stop = len(lines)
+        for index, other in headers[n + 1 :]:
+            if not re.sub(r"\s+", "", other.group(2)).startswith("clients."):
+                stop = index
+                break
+        body = lines[start + 1 : stop]
+        names = [m.group(1) or m.group(2) for line in body if (m := _CLIENT_NAME_RE.match(line))]
+        if len(names) != 1:
+            continue
+        name = names[0]
+        if name in found:
+            twice.add(name)
+        kept = (" ".join(line.split()) for line in body)
+        found[name] = "\n".join(line for line in kept if line and not line.startswith("#"))
+    return {k: v for k, v in found.items() if k not in twice}
 
 
 def _walk_keys(value: Any) -> list[str]:
@@ -434,8 +524,33 @@ class _Edit:
     lines: list[str]
 
 
+@contextmanager
+def _edit_lock(path: Path) -> Iterator[None]:
+    """Hold an exclusive lock on `.<config name>.lock` next to the config (POSIX only).
+
+    Two admin commands that commit at the same moment take turns, so the second one sees
+    the first one's change and refuses instead of overwriting it.
+    """
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover - Windows: the content check still applies
+        yield
+        return
+    lock_path = path.parent / f".{path.name}.lock"
+    with lock_path.open("a+b") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 class ConfigEditor:
-    """Line-level edits of `[[clients]]` and `[[connectors]]` entries, found by name."""
+    """Line-level edits of `[[clients]]` and `[[connectors]]` entries, found by name.
+
+    `commit` refuses when the file changed after it was read (another `jezero device`
+    command, or a hand edit): it never overwrites a change it did not see.
+    """
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -545,14 +660,24 @@ class ConfigEditor:
                 load_config(tmp)
             except Exception as exc:  # noqa: BLE001  report any reason, change nothing
                 raise ConfigEditError(f"the edited config would not load: {exc}") from exc
-            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-            backup = folder / f"{self.path.name}.bak-{stamp}"
-            n = 1
-            while backup.exists():
-                backup = folder / f"{self.path.name}.bak-{stamp}-{n}"
-                n += 1
-            shutil.copy2(self.path, backup)
-            os.replace(tmp, self.path)
+            with _edit_lock(self.path):
+                try:
+                    current = self.path.read_text(encoding="utf-8")
+                except OSError as exc:
+                    raise ConfigEditError(f"could not read {self.path} again: {exc}") from exc
+                if current != self.text:
+                    raise ConfigEditError(
+                        f"{self.path} changed since it was read (another command or an "
+                        "editor wrote it); nothing was changed, run the command again"
+                    )
+                stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+                backup = folder / f"{self.path.name}.bak-{stamp}"
+                n = 1
+                while backup.exists():
+                    backup = folder / f"{self.path.name}.bak-{stamp}-{n}"
+                    n += 1
+                shutil.copy2(self.path, backup)
+                os.replace(tmp, self.path)
         finally:
             tmp.unlink(missing_ok=True)
         try:

@@ -13,6 +13,10 @@ That keeps the existing connectors working unchanged on a device's folder.
 
 The file's mtime is set to the upload time, not the source time: connectors keep a cursor
 on mtime, and a device that was offline for a week must not upload "into the past".
+
+A file whose own name says it is compressed (Codex's `.jsonl.zst`) is stored as sent, but
+only after it was decompressed in chunks and found to stay within the size limit: a small
+file that expands to gigabytes is refused at the door, not when a connector opens it.
 """
 
 from __future__ import annotations
@@ -102,6 +106,42 @@ def read_body(raw: bytes, *, encoding: str | None, max_bytes: int) -> bytes:
     return out.getvalue()
 
 
+def check_compressed_file(relpath: str, data: bytes, *, max_bytes: int) -> None:
+    """Refuse (413) a `.zst` file that decompresses beyond `max_bytes`.
+
+    The file is decompressed in chunks and nothing is kept. Bytes that are not valid zstd
+    are stored as sent, like any other file the connector will fail to read: they cannot
+    expand, and the connector's own reads are bounded too.
+    """
+    if not relpath.endswith(".zst"):
+        return
+    reader = zstandard.ZstdDecompressor().stream_reader(io.BytesIO(data), read_across_frames=True)
+    total = 0
+    try:
+        with reader:
+            while chunk := reader.read(1 << 20):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise InboxError("file too large", status=413)
+    except (zstandard.ZstdError, OSError, EOFError):
+        return
+
+
+def device_usage(inbox_dir: Path, device: str, *, skip: Path | None = None) -> int:
+    """Bytes in a device's inbox folder, without `skip` (the file an upload replaces)."""
+    total = 0
+    for root, _, files in os.walk(inbox_dir / device):
+        for name in files:
+            path = Path(root) / name
+            if skip is not None and path == skip:
+                continue
+            try:
+                total += path.lstat().st_size
+            except OSError:
+                continue
+    return total
+
+
 async def read_stream(chunks: AsyncIterator[bytes], *, max_bytes: int) -> bytes:
     """Collect a request body chunk by chunk, refusing it (413) as soon as it passes
     `max_bytes`: a body sent without Content-Length never sits whole in memory."""
@@ -123,17 +163,28 @@ def store(
     relpath: str,
     data: bytes,
     project: str | None = None,
+    *,
+    max_device_bytes: int | None = None,
 ) -> Stored:
     """Write atomically (temp file + rename); a newer upload of a session replaces it.
 
     `project` is what the device's client found for the session (its git repository or
     configured folders); it goes next to the file as `<file>.project` for the connectors.
+    With `max_device_bytes`, an upload that would take the device's folder past it is
+    refused with 507 (the file it replaces does not count). Two uploads of one device at
+    the same moment may each pass the check, so the folder can end one file over.
     """
     target = target_path(inbox_dir, device, agent, relpath)
     if not data:
         raise InboxError("empty body")
     if project is not None and not _PROJECT.match(project):
         raise InboxError("invalid project name")
+    if max_device_bytes is not None:
+        used = device_usage(inbox_dir.resolve(), device, skip=target)
+        if used + len(data) > max_device_bytes:
+            raise InboxError(
+                "device inbox full: the server's inbox.max_device_mb is reached", status=507
+            )
     target.parent.mkdir(parents=True, exist_ok=True)
     sidecar = Path(str(target) + SIDECAR_SUFFIX)
     if project:

@@ -4,8 +4,9 @@ Agents connect over Streamable HTTP with a bearer token. Each token maps to a cl
 config, and each client only sees the sources it is allowed to read. There is no tool that
 writes: ingestion happens through connectors, never through the agents' channel.
 
-The `[[clients]]` list is read again from the config file when the file changes, so
-`jezero device approve`, `revoke` and `rotate` take effect without a restart.
+The `[[clients]]` list is read again from the config file when the file (or the `.env`
+next to it) changes, so `jezero device approve`, `revoke` and `rotate` take effect without
+a restart.
 """
 
 from __future__ import annotations
@@ -16,7 +17,6 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,11 +33,12 @@ from mcp.types import ToolAnnotations
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import __version__
-from .config import ClientConfig, Config, load_config
+from .config import ClientConfig, Config, client_blocks, env_file_for, load_config
 from .models import Item, SearchHit
-from .store import Store
+from .store import SQLITE_MAX_INT, Store
 
 log = logging.getLogger(__name__)
 
@@ -141,31 +142,51 @@ class _Snapshot:
 class ClientRegistry:
     """The `[[clients]]` of the config, kept in step with the file.
 
-    Every lookup costs at most one `stat()` per second. When the file changed, it is
-    loaded and validated again with the same models as at start; if that fails, the
-    previous clients stay and the error is logged. Used as the MCP token verifier and by
-    the inbox and API routes, so a revoked key stops working everywhere at once.
+    Every lookup costs at most two `stat()` calls per second. When the config file or the
+    `.env` next to it changed, the config is loaded and validated again with the same
+    models as at start (which also applies the `.env`'s current values, so a `token_env`
+    key changed or removed there takes effect). If the file does not load, the registry
+    fails closed for what it cannot read: it keeps only the clients whose `[[clients]]`
+    entry is still there with exactly the text it had at the last good load, and drops
+    the rest (removed, rotated or otherwise edited) until the file loads again. Used as
+    the MCP token verifier and by the inbox and API routes, so a revoked key stops working
+    everywhere at once.
     """
 
     def __init__(self, config: Config) -> None:
         self._path: Path | None = config.source_file
         self._lock = threading.Lock()
-        self._snapshot = self._build(config.clients)
+        self._good = list(config.clients)
+        self._snapshot = self._build(self._good)
         self._stamp = self._stat()
+        self._blocks = self._read_blocks() or {}
         self._checked = time.monotonic()
 
     @staticmethod
     def _build(clients: list[ClientConfig]) -> _Snapshot:
         return _Snapshot({c.name: c for c in clients}, StaticTokenVerifier(clients))
 
-    def _stat(self) -> tuple[int, int, int] | None:
+    def _stat(self) -> tuple[tuple[int, int, int] | None, ...] | None:
+        if self._path is None:
+            return None
+        stamps: list[tuple[int, int, int] | None] = []
+        for path in (self._path, env_file_for(self._path)):
+            try:
+                st = path.stat()
+            except OSError:
+                stamps.append(None)
+                continue
+            stamps.append((st.st_mtime_ns, st.st_size, st.st_ino))
+        return tuple(stamps)
+
+    def _read_blocks(self) -> dict[str, str] | None:
+        """The file's `[[clients]]` entries by name; None when it cannot be read."""
         if self._path is None:
             return None
         try:
-            st = self._path.stat()
+            return client_blocks(self._path.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             return None
-        return (st.st_mtime_ns, st.st_size, st.st_ino)
 
     def refresh(self) -> None:
         """Re-read the clients if the config file changed (checked once a second)."""
@@ -182,19 +203,37 @@ class ClientRegistry:
             if stamp is None or stamp == self._stamp:
                 return
             self._stamp = stamp
+            blocks = self._read_blocks()
             try:
                 fresh = load_config(self._path)
             except Exception as exc:  # noqa: BLE001  a bad edit must not take the server down
-                log.error(
-                    "config changed but could not be loaded; keeping the previous %d clients: %s",
-                    len(self._snapshot.clients),
-                    exc,
-                )
+                self._fail_closed(blocks or {}, exc)
                 return
             before = list(self._snapshot.clients.values())
-            self._snapshot = self._build(fresh.clients)
+            self._good = list(fresh.clients)
+            self._blocks = blocks or {}
+            self._snapshot = self._build(self._good)
             if fresh.clients != before:
                 log.info("clients reloaded: %s", ", ".join(self._snapshot.verifier.active_clients))
+
+    def _fail_closed(self, blocks: dict[str, str], exc: Exception) -> None:
+        """Keep only the clients whose entry is unchanged since the last good load."""
+        kept = [
+            c
+            for c in self._good
+            if c.name in self._blocks and blocks.get(c.name) == self._blocks[c.name]
+        ]
+        dropped = sorted({c.name for c in self._good} - {c.name for c in kept})
+        self._snapshot = self._build(kept)
+        log.error(
+            "config changed but could not be loaded (%s: %s); keeping the previous clients "
+            "whose [[clients]] entry is unchanged (%s) and refusing the keys of those removed "
+            "or edited (%s) until it loads. `jezero check-config` shows the error",
+            self._path,
+            exc,
+            ", ".join(c.name for c in kept) or "none",
+            ", ".join(dropped) or "none",
+        )
 
     def current(self) -> _Snapshot:
         self.refresh()
@@ -305,7 +344,23 @@ def _parse_dt(value: str | None, field: str) -> datetime | None:
     if parsed.tzinfo is None:
         # Agents often send a bare date ("2026-01-31"): read it as UTC rather than fail.
         parsed = parsed.replace(tzinfo=UTC)
-    return parsed
+    shown = value if len(value) <= 60 else value[:57] + "..."
+    try:
+        # The store compares UTC strings; an offset at the edge of the calendar
+        # (9999-12-31T23:00:00-05:00) has no UTC equivalent.
+        return parsed.astimezone(UTC)
+    except OverflowError as exc:
+        raise ToolError(f"{field} is out of range once converted to UTC: {shown!r}") from exc
+
+
+def _check_item_id(item_id: int) -> int:
+    """Item ids are SQLite integers: refuse what could never be one, with a clear message.
+
+    Ids inside the range that match nothing (0, -1) still answer `found: false`.
+    """
+    if not -SQLITE_MAX_INT - 1 <= item_id <= SQLITE_MAX_INT:
+        raise ToolError(f"item_id is out of range: item ids are integers up to {SQLITE_MAX_INT}")
+    return item_id
 
 
 def build_server(config: Config, store: Store | None = None) -> tuple[MCPServer, Starlette]:
@@ -375,6 +430,7 @@ def build_server(config: Config, store: Store | None = None) -> tuple[MCPServer,
     @mcp.tool(annotations=READ_ONLY)
     def get_item(item_id: int, include_original: bool = False) -> dict[str, Any]:
         """Read one item in full. Set include_original only when the summary is not enough."""
+        item_id = _check_item_id(item_id)
         item: Item | None = store.get(item_id, allowed_sources=principal().sources)
         if item is None:
             return {"found": False}
@@ -387,6 +443,7 @@ def build_server(config: Config, store: Store | None = None) -> tuple[MCPServer,
         decision, plan or status: a later session may have changed it. Pass `query` with the
         words of what you are checking (for example the names in the decision); without it
         the item's title is used, which is broader. limit: default 5."""
+        item_id = _check_item_id(item_id)
         who = principal()
         item = store.get(item_id, allowed_sources=who.sources)
         if item is None:
@@ -445,29 +502,31 @@ def build_server(config: Config, store: Store | None = None) -> tuple[MCPServer,
         transport_security=security,
         host=server_cfg.host,
     )
-    guard = _host_guard(security)
-    _add_inbox_routes(app, config, registry, guard)
-    _add_api_routes(app, config, store, registry, guard)
+    _add_inbox_routes(app, config, registry)
+    _add_api_routes(app, config, store, registry)
+    # Outermost, so the Host/Origin check runs before the key is looked at, on every
+    # route: MCP, the OAuth metadata, the inbox, the overview and the bundle.
+    app.add_middleware(HostOriginGuard, security=security)
     return mcp, app
 
 
-Endpoint = Callable[[Request], Awaitable[Response]]
+class HostOriginGuard:
+    """ASGI middleware: the SDK's Host/Origin check (421/403) before anything else runs."""
 
+    def __init__(self, app: ASGIApp, security: TransportSecuritySettings) -> None:
+        self.app = app
+        self.checker = TransportSecurityMiddleware(security)
 
-def _host_guard(security: TransportSecuritySettings) -> Callable[[Endpoint], Endpoint]:
-    """Wrap a route with the same Host/Origin check the SDK applies to MCP (421/403)."""
-    checker = TransportSecurityMiddleware(security)
-
-    def wrap(endpoint: Endpoint) -> Endpoint:
-        async def guarded(request: Request) -> Response:
-            refused = await checker.validate_request(request, is_post=False)
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in ("http", "websocket"):
+            refused = await self.checker.validate_request(Request(scope), is_post=False)
             if refused is not None:
-                return refused
-            return await endpoint(request)
-
-        return guarded
-
-    return wrap
+                if scope["type"] == "websocket":
+                    await send({"type": "websocket.close", "code": 1008})
+                    return
+                await refused(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def _bearer(request: Request) -> str | None:
@@ -481,7 +540,6 @@ def _add_api_routes(
     config: Config,
     store: Store,
     registry: ClientRegistry,
-    guard: Callable[[Endpoint], Endpoint],
 ) -> None:
     """`GET /api/v1/overview`: counts for the `jezero` dashboard, with any client key.
 
@@ -509,14 +567,13 @@ def _add_api_routes(
         body = {"ok": True, "device": name, "upload": upload, "version": __version__, **data}
         return JSONResponse(body)
 
-    app.router.routes.append(Route("/api/v1/overview", guard(overview), methods=["GET"]))
+    app.router.routes.append(Route("/api/v1/overview", overview, methods=["GET"]))
 
 
 def _add_inbox_routes(
     app: Starlette,
     config: Config,
     registry: ClientRegistry,
-    guard: Callable[[Endpoint], Endpoint],
 ) -> None:
     """Device uploads (`PUT /inbox/v1/<agent>/<path>`) and a ping to check a device key.
 
@@ -531,6 +588,8 @@ def _add_inbox_routes(
     from . import inbox
 
     max_bytes = int(config.inbox.max_mb * 1024 * 1024)
+    max_device = config.inbox.max_device_mb
+    max_device_bytes = int(max_device * 1024 * 1024) if max_device is not None else None
 
     def device(request: Request) -> str:
         token = _bearer(request)
@@ -567,9 +626,18 @@ def _add_inbox_routes(
             data = inbox.read_body(
                 raw, encoding=request.headers.get("content-encoding"), max_bytes=max_bytes
             )
+            # A .jsonl.zst is stored compressed: check what it expands to before keeping it.
+            await asyncio.to_thread(inbox.check_compressed_file, relpath, data, max_bytes=max_bytes)
             project = request.headers.get("x-jezero-project") or None
             stored = await asyncio.to_thread(
-                inbox.store, config.inbox_dir, name, agent, relpath, data, project
+                inbox.store,
+                config.inbox_dir,
+                name,
+                agent,
+                relpath,
+                data,
+                project,
+                max_device_bytes=max_device_bytes,
             )
         except inbox.InboxError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=exc.status)
@@ -592,9 +660,9 @@ def _add_inbox_routes(
         return FileResponse(bundle_path, media_type="application/gzip", filename=bundle_path.name)
 
     routes = app.router.routes
-    routes.append(Route("/client/jezero-client.tar.gz", guard(bundle), methods=["GET"]))
-    routes.append(Route("/inbox/v1/ping", guard(ping), methods=["GET"]))
-    routes.append(Route("/inbox/v1/{agent}/{relpath:path}", guard(upload), methods=["PUT"]))
+    routes.append(Route("/client/jezero-client.tar.gz", bundle, methods=["GET"]))
+    routes.append(Route("/inbox/v1/ping", ping, methods=["GET"]))
+    routes.append(Route("/inbox/v1/{agent}/{relpath:path}", upload, methods=["PUT"]))
 
 
 def _host_pattern(host: str) -> str:

@@ -43,10 +43,12 @@ disabled, with a warning in the log; the server refuses to start when no client 
 usable key. Two clients whose `token_env` variables hold the same key are both disabled,
 with an error in the log.
 
-The server reads the `[[clients]]` list again when `jezero.toml` changes, at most once a
-second, so a key added, rotated or revoked works (or stops working) without a restart. A
-file that no longer loads leaves the previous clients in place and logs `config changed
-but could not be loaded; keeping the previous N clients`.
+The server reads the `[[clients]]` list again when `jezero.toml` or the `.env` next to it
+changes, at most once a second, so a key added, rotated or revoked works (or stops
+working) without a restart. A file that no longer loads keeps only the clients whose
+`[[clients]]` entry is unchanged since the last good load, refuses the keys of the others,
+and logs `config changed but could not be loaded (...); keeping the previous clients whose
+[[clients]] entry is unchanged (...)`.
 
 A request without a key, or with an unknown one, gets HTTP 401 before any tool runs:
 
@@ -61,8 +63,9 @@ with this header, whose `resource_metadata` route is described in
 WWW-Authenticate: Bearer error="invalid_token", error_description="Authentication required", resource_metadata="https://YOUR-JEZERO/.well-known/oauth-protected-resource/mcp"
 ```
 
-`require_auth = false` is accepted only when `[server].host` is a loopback address. Then
-no key is needed and every caller sees every source.
+`require_auth = false` is accepted only when `[server].host` is a loopback address and
+neither `[server].public_url` nor `[server].allowed_hosts` is set. Then no key is needed
+and every caller sees every source.
 
 The server also checks the `Host` header of every request, MCP and the [HTTP
 routes](http-api.md) alike (DNS-rebinding protection). It accepts the host of
@@ -167,6 +170,9 @@ How the query matches:
   ignoring case and accents: `invoice` finds `invoices`, `facturacion` finds `facturación`.
   Terms shorter than 3 characters are dropped; a query with no term left returns no
   result.
+- Limits: control characters count as spaces; only the first 4096 characters of the query
+  are read, a term keeps its first 100 characters, and only the first 64 distinct terms
+  are used. The rest is ignored without an error.
 - The searched text is the item's title, summary, questions, atom texts and project, with
   BM25 weights 2.0, 1.0, 1.5, 1.5 and 0.5. The original text is not searched.
 
@@ -378,6 +384,8 @@ text block; only authentication and transport problems use HTTP status codes.
 |---|---|
 | A required argument is missing | `Error executing tool search: 1 validation error for searchArguments ...` |
 | An argument has the wrong type | `Error executing tool get_item: 1 validation error for get_itemArguments ...` |
+| `item_id` outside SQLite's 64-bit integer range | `Error executing tool get_item: item_id is out of range: item ids are integers up to 9223372036854775807` |
+| `since` or `until` has no UTC equivalent (`9999-12-31T23:59:59-05:00`) | `Error executing tool search: since is out of range once converted to UTC: '...'` |
 | `since` or `until` is not ISO 8601 | `Error executing tool timeline: since must be an ISO 8601 date or datetime (2026-01-31 or 2026-01-31T09:00:00+02:00), got 'yesterday'` |
 | The tool does not exist | `Unknown tool: NAME` |
 

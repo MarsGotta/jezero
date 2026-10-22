@@ -55,7 +55,10 @@ file that does not load leaves the server with the keys it had, and an error in 
    ```
 
    The device name uses lowercase letters, digits, `-` and `_`. A trailing `/mcp` in the
-   URL is removed. If the server's MCP endpoint is not `/mcp` (`[server].path`), add
+   URL is removed. The URL must be `https://`, or `http://` to this same computer: plain
+   HTTP to another computer sends the key in clear, so `init` refuses it unless you add
+   `--insecure-http` (for a private network such as a VPN). The client never follows
+   redirects either, so use the server's final address. If the server's MCP endpoint is not `/mcp` (`[server].path`), add
    `--mcp-path PATH`. Add `--no-upload` for a [read-only
    computer](#read-only-or-uploading). `jezero connect` does the same from the
    [`jezero` command](app.md), asking for each value; its read-only question defaults to
@@ -462,7 +465,7 @@ stay the same:
 
    > [!NOTE]
    > `init --force` keeps the computer's other settings, such as `projects`. Pass
-   > `--no-upload` and `--mcp-path` again if the computer used them.
+   > `--no-upload`, `--mcp-path` and `--insecure-http` again if the computer used them.
 
 2. On the server, replace the fingerprint:
 

@@ -207,17 +207,23 @@ there means the inbox moved.
 
 ### A change to `jezero.toml` has no effect
 
-**What you see.** A key you approved, rotated or revoked still behaves as before, and the
-server's log has `config changed but could not be loaded; keeping the previous N
-clients: ...`.
+**What you see.** A key you approved does not work yet, or a key whose entry you edited
+stops working, and the server's log has `config changed but could not be loaded (...);
+keeping the previous clients whose [[clients]] entry is unchanged (...) and refusing the
+keys of those removed or edited (...)`.
 
-**Why.** The server reads `[[clients]]` again whenever the file changes, but only if the
-whole file still loads. Otherwise it keeps the clients it had, so a typo cannot lock
-everyone out. Other settings, such as `[server]` and `[inbox]`, are read only at start.
+**Why.** The server reads `[[clients]]` again whenever the file (or the `.env` next to it)
+changes, but only takes the new list if the whole file still loads. Otherwise it fails
+closed: clients whose entry is exactly as it was keep working, so a typo does not lock
+everyone out, while a removed or edited client is refused, so a revocation is never
+undone by a typo. Other settings, such as `[server]` and `[inbox]`, are read only at
+start.
 
 **Fix.** Run `jezero check-config`, fix what it reports, and save the file again. The
 `jezero device` commands check the file before they write it and keep a copy,
-`jezero.toml.bak-<UTC time>`, next to it. After changing `[server]` or `[inbox]`, restart
+`jezero.toml.bak-<UTC time>`, next to it. If one says the file `changed since it was
+read`, another command or an editor wrote it in the meantime: nothing was changed, run it
+again. After changing `[server]` or `[inbox]`, restart
 the server.
 
 ## Agents
@@ -361,8 +367,11 @@ same name to `--allowedTools`. See [Connect an agent](connect-agents.md#claude-c
 **Why.** The background flush stops at the first failure and keeps the rest, so an
 unreachable server keeps everything queued. `client.log` says why, for example
 `flush stopped at ...: <urlopen error [Errno 111] Connection refused>`. A server that
-refuses the key keeps the queue too: see [Uploads refused](#uploads-refused). Only one
-flush runs at a time; a flush that died leaves a lock that expires after 10 minutes.
+refuses the key keeps the queue too: see [Uploads refused](#uploads-refused). So does
+HTTP 507 `device inbox full`: the device's folder reached the server's
+[`inbox.max_device_mb`](../reference/configuration.md#inbox); raise it or clear old files
+of that device in the inbox, then `flush`. Only one flush runs at a time; a flush that died
+leaves a lock that expires after 10 minutes.
 
 **Fix.** Fix the connection (see [Server not reachable](#server-not-reachable) and
 [`Invalid Host header`](#invalid-host-header)), then send the queue:
@@ -407,8 +416,8 @@ rejected uploads: 1
 
 **Why.** The server refused that file for good: HTTP 413 for a file above
 [`inbox.max_mb`](../reference/configuration.md#inbox) (64 MB after decompression by
-default), 400 for a path or body it does not accept, 415 for an encoding it does not
-read. The client records the file as rejected and does not send it again until the file
+default, also for what a Codex `.jsonl.zst` file expands to), 400 for a path or body it
+does not accept, 415 for an encoding it does not read. The client records the file as rejected and does not send it again until the file
 changes. The other sessions are not held up.
 
 **Fix.** For 413, raise `inbox.max_mb` on the server and restart it, then touch the

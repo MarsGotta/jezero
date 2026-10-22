@@ -113,7 +113,9 @@ class SearchHit:
 
 
 def content_hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    # `surrogatepass`: a lone surrogate (half an emoji, JSON-escaped) must not make the
+    # hash raise. Valid text hashes exactly as before.
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def atoms_from_json(raw: str | None) -> list[Atom]:

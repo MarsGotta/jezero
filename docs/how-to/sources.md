@@ -140,7 +140,8 @@ three sessions than on three thousand.
    ```
 
    For a large source, run it by hand in steps instead, with `--limit N`, which processes
-   the oldest N sessions and moves the cursor; repeat until `docs` reaches 0. If the timer
+   the oldest N sessions (more when several share the Nth one's timestamp, as files copied
+   together do) and moves the cursor; repeat until `docs` reaches 0. If the timer
    fires during your run, it skips with `{"skipped": "another run is in progress"}`.
 
 From then on the timer runs it. [Keep an eye on Jezero](monitor.md) tells you if it stops.
@@ -194,7 +195,8 @@ Jezero takes it from the source when it can, which beats the model's guess:
    computer. The longest match wins.
 3. The git repository the session ran in; for a worktree, the main repository.
 4. `[projects] roots`: the folder right below one of these names (`projects`, `code`,
-   `dev`, `src`, `repos` and other common ones by default).
+   `dev`, `src`, `repos` and other common ones by default), inside the home folder: a
+   user named `dev` does not turn every folder of their home into a project.
 5. The connector's own `project`, a default for everything it reads.
 6. Nothing found: the summarizer chooses, preferring the slugs in
    `summarizer.known_projects`.
@@ -285,12 +287,15 @@ keeps each item's source, id, date and project. It calls the model once per item
    ```
 
    Or name a few with `--ids 12,15,31`. You should see a report like the one of a run,
-   with `"stored"` equal to the number of items and `"failed": 0`.
+   with `"stored"` equal to the number of items and `"failed": 0`. If a run is in
+   progress, it does nothing, says so and exits with code 3 (as does `jezero retag`): run
+   it again when the run ends.
 
 ## Hide more secrets
 
-Jezero redacts common credential shapes (API keys, tokens, private keys, passwords in
-assignments and URLs) before anything is summarised, stored or indexed. Add your own
+Jezero redacts common credential shapes (API keys and tokens of common services, private
+keys even when cut short, webhook URLs, `Authorization` and `Cookie` headers, passwords in
+assignments, command lines and URLs) before anything is summarised, stored or indexed. Add your own
 patterns for what only you know, such as internal host names or customer ids.
 
 1. Add regular expressions (Python syntax) to `[redaction]`. Single quotes keep

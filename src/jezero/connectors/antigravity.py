@@ -31,6 +31,7 @@ from `conversation_summaries.db` when it is there.
 from __future__ import annotations
 
 import fnmatch
+import functools
 import json
 import os
 import re
@@ -50,6 +51,8 @@ from .base import (
     ConnectorType,
     PromptCleaner,
     RawDoc,
+    batch_full,
+    read_or_skip,
     require_dir,
     segment,
     whole_session,
@@ -198,16 +201,19 @@ class AntigravityConnector:
         docs: list[RawDoc] = []
         processed: list[float] = []
         unreadable: list[str] = []
+        skipped: list[str] = []
         taken = 0
         for mtime, path in ready:
-            if (sample is not None and taken >= sample) or (limit is not None and taken >= limit):
+            last = processed[-1] if processed else None
+            if batch_full(taken, mtime, last, limit=limit, sample=sample):
                 break
             if self.transcripts_dir is not None:
-                conversation_docs, readable = self._transcript_docs(path, mtime)
+                read = functools.partial(self._transcript_docs, path, mtime)
             else:
-                conversation_docs, readable = self._conversation_docs(
-                    path, info.get(path.stem, {}), mtime
+                read = functools.partial(
+                    self._conversation_docs, path, info.get(path.stem, {}), mtime
                 )
+            conversation_docs, readable = read_or_skip(str(path), skipped, read) or ([], True)
             if not readable:
                 unreadable.append(path.parent.name if self.transcripts_dir else path.stem)
             processed.append(mtime)
@@ -220,7 +226,13 @@ class AntigravityConnector:
                 f"format check: nothing readable in {len(unreadable)} conversation(s) with"
                 f" steps ({', '.join(unreadable[:3])}); the Antigravity format may have changed"
             )
-        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred, warnings=warnings)
+        return Batch(
+            docs=docs,
+            next_cursor=next_cursor,
+            deferred=deferred,
+            warnings=warnings,
+            skipped=skipped,
+        )
 
     def _summaries(self) -> dict[str, dict[str, Any]]:
         path = self.data_dir / "conversation_summaries.db"

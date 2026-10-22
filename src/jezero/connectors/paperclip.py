@@ -19,6 +19,7 @@ Folder rules (`paths`, `roots`, git) do not apply: issues have no working direct
 
 from __future__ import annotations
 
+import functools
 import os
 import time
 from datetime import UTC, datetime
@@ -33,6 +34,8 @@ from .base import (
     BuildContext,
     ConnectorType,
     RawDoc,
+    batch_full,
+    read_or_skip,
     segment,
     truncate_middle,
     whole_session,
@@ -139,20 +142,24 @@ class PaperclipConnector:
             names: dict[str, dict[str, str]] = {}
             docs: list[RawDoc] = []
             processed: list[float] = []
+            skipped: list[str] = []
             taken = 0
             for activity, company, issue in ready:
-                if (sample is not None and taken >= sample) or (
-                    limit is not None and taken >= limit
-                ):
+                last = processed[-1] if processed else None
+                if batch_full(taken, activity, last, limit=limit, sample=sample):
                     break
                 if company not in names:
                     names[company] = self._names(http, company)
-                issue_docs = self._issue_docs(http, issue, names[company])
+                read = functools.partial(self._issue_docs, http, issue, names[company], company)
+                label = f"issue {issue.get('identifier') or issue.get('id')}"
+                # HTTP errors may pass (a restart, a timeout): they fail the run and the
+                # issue is read again next time. A malformed issue is skipped.
+                issue_docs = read_or_skip(label, skipped, read, transient=(httpx.HTTPError,))
                 processed.append(activity)
-                docs.extend(issue_docs)
+                docs.extend(issue_docs or [])
                 taken += 1 if (issue_docs or sample is None) else 0
         next_cursor = repr(max(processed)) if sample is None and processed else None
-        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
+        return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred, skipped=skipped)
 
     def _names(self, http: httpx.Client, company: str) -> dict[str, str]:
         names: dict[str, str] = {}
@@ -174,7 +181,11 @@ class PaperclipConnector:
         return "system"
 
     def _issue_docs(
-        self, http: httpx.Client, issue: dict[str, Any], names: dict[str, str]
+        self,
+        http: httpx.Client,
+        issue: dict[str, Any],
+        names: dict[str, str],
+        company: str | None = None,
     ) -> list[RawDoc]:
         issue_id = str(issue["id"])
         detail = self._get(http, f"/issues/{issue_id}")
@@ -250,6 +261,9 @@ class PaperclipConnector:
         if sum(len(b[2]) for b in blocks) < self.min_chars:
             return []
         parts = segment(blocks, self.max_segment_chars)
+        # Identifiers are unique within one Paperclip company only: the company id keeps
+        # two instances (or companies) with an `ACME-1` each from being taken for copies.
+        ref = f"paperclip-issue:{company}/{ident}" if company else f"paperclip-issue:{ident}"
         docs = []
         for number, part in enumerate(parts, 1):
             label = f"{ident} {title}"
@@ -262,7 +276,7 @@ class PaperclipConnector:
                     text="\n\n".join(b[2] for b in part),
                     title_hint=label,
                     project_hint=project,
-                    original_ref=f"paperclip-issue:{ident}",
+                    original_ref=ref,
                     meta={"status": detail.get("status"), "part": number, "parts": len(parts)},
                 )
             )
