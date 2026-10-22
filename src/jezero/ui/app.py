@@ -189,9 +189,15 @@ def _int(n: Any) -> str:
 
 
 def item_view(
-    item: dict[str, Any], p: Palette, newer: list[dict] | None = None, hint: str | None = None
+    item: dict[str, Any],
+    p: Palette,
+    newer: list[dict] | None = None,
+    hint: str | None = None,
+    matched_by: str = "subject",
 ) -> Group:
-    """One memory: title, where it comes from, summary, atoms, questions, newer items."""
+    """One memory: title, where it comes from, summary, atoms, questions, newer items.
+    `matched_by` is how the server found them: "project_timeline" means nothing later
+    matched the subject, and they are only the project's newer items, by date."""
     parts: list[Any] = []
     parts.append(Text(str(item.get("title") or "(untitled)"), style=f"bold {p.foreground}"))
     meta = Text()
@@ -229,7 +235,13 @@ def item_view(
         for q in questions[:5]:
             parts.append(Text.assemble(("? ", f"bold {p.teal}"), (str(q), p.foreground)))
     if newer is not None:
-        parts += [Text(), Text("NEWER ON THIS SUBJECT", style=f"bold {p.muted}"), Text()]
+        by_date = matched_by == "project_timeline" and bool(newer)
+        title = (
+            "NEWER IN THIS PROJECT (by date, not by subject)"
+            if by_date
+            else "NEWER ON THIS SUBJECT"
+        )
+        parts += [Text(), Text(title, style=f"bold {p.muted}"), Text()]
         if not newer:
             parts.append(Text("✔ Nothing newer: this is the latest word.", style=p.success))
         for n in newer:
@@ -449,11 +461,11 @@ class ItemScreen(ModalScreen[None]):
     @work(thread=True, exclusive=True)
     def action_newer(self) -> None:
         try:
-            newer = self.backend.later(int(self.item["id"]), None)
+            newer, how = self.backend.later(int(self.item["id"]), None)
         except BackendError as exc:
             self.app.call_from_thread(self.app.notify, str(exc), severity="error")
             return
-        view = item_view(self.item, self.app.palette, newer)  # type: ignore[attr-defined]
+        view = item_view(self.item, self.app.palette, newer, matched_by=how)  # type: ignore[attr-defined]
         self.app.call_from_thread(self.query_one("#modal-item", Static).update, view)
 
 
@@ -499,8 +511,8 @@ class ConnectScreen(ModalScreen[bool]):
         intro = Text()
         intro.append("Connect this computer to Jezero\n\n", style=f"bold {p.foreground}")
         intro.append(
-            "Jezero creates a key here and keeps it here. The server only stores its "
-            "fingerprint, which its admin approves once.\n",
+            "Jezero creates a key and keeps it on this computer. The server only keeps its "
+            "SHA-256 fingerprint, which its admin approves once.\n",
             style=p.muted,
         )
         with Vertical(id="modal"), Vertical(id="connect"):
@@ -580,6 +592,7 @@ class JezeroApp(App[None]):
         self.results: dict[str, dict] = {}
         self.current: dict[str, Any] | None = None
         self.current_newer: list[dict] | None = None
+        self.current_matched_by = "subject"
         self.latest_items: list[dict] = []
         self.agent_statuses: list[AgentStatus] = []
         self.last_hits: tuple[str, list[dict]] | None = None
@@ -711,7 +724,9 @@ class JezeroApp(App[None]):
             if highlighted is not None:
                 self.query_one("#results-list", OptionList).highlighted = highlighted
         if self.current is not None:
-            view = item_view(self.current, p, self.current_newer)
+            view = item_view(
+                self.current, p, self.current_newer, matched_by=self.current_matched_by
+            )
             self.query_one("#detail-body", Static).update(view)
         if self.timeline_state:
             self.show_timeline(*self.timeline_state)
@@ -906,6 +921,7 @@ class JezeroApp(App[None]):
         if item and item is not self.current:
             self.current = item
             self.current_newer = None
+            self.current_matched_by = "subject"
             self.query_one("#detail-body", Static).update(item_view(item, self.palette))
             self.query_one("#detail").scroll_home(animate=False)
 
@@ -921,7 +937,7 @@ class JezeroApp(App[None]):
     def check_newer(self, item: dict[str, Any]) -> None:
         assert self.backend is not None
         try:
-            newer = self.backend.later(int(item["id"]), None)
+            newer, how = self.backend.later(int(item["id"]), None)
         except BackendError as exc:
             self.call_from_thread(self.notify, str(exc), severity="error")
             return
@@ -929,7 +945,9 @@ class JezeroApp(App[None]):
         def show() -> None:
             if self.current is item:
                 self.current_newer = newer
-                self.query_one("#detail-body", Static).update(item_view(item, self.palette, newer))
+                self.current_matched_by = how
+                view = item_view(item, self.palette, newer, matched_by=how)
+                self.query_one("#detail-body", Static).update(view)
 
         self.call_from_thread(show)
 

@@ -50,7 +50,9 @@ from .base import (
     ConnectorType,
     PromptCleaner,
     RawDoc,
+    require_dir,
     segment,
+    whole_session,
 )
 
 if TYPE_CHECKING:
@@ -171,10 +173,12 @@ class AntigravityConnector:
     ) -> Batch:
         if self.transcripts_dir is not None:
             store, pattern = self.transcripts_dir, "*/transcript.jsonl"
+            require_dir("transcripts_dir", store)
         else:
             store, pattern = self.data_dir / "conversations", "*.db"
-        if not store.is_dir():
-            raise FileNotFoundError(f"Antigravity conversations not found: {store}")
+            require_dir("data_dir", self.data_dir)
+            if not store.is_dir():
+                raise FileNotFoundError(f"data_dir has no conversations folder: {store}")
         now = time.time() if now is None else now
         settled_before = now - self.settle_seconds
         cursor = float(state.cursor) if state.cursor and sample is None else 0.0
@@ -324,7 +328,7 @@ class AntigravityConnector:
                     meta={"part": number, "parts": len(parts)},
                 )
             )
-        return docs
+        return whole_session(conversation, docs)
 
     @staticmethod
     def _stamp(metadata: Any) -> float | None:

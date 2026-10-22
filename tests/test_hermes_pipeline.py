@@ -107,7 +107,11 @@ def env(tmp_path, monkeypatch):
             "storage": {"path": str(tmp_path / "lib.db")},
             "summarizer": {"model": "fake-haiku", "api_key_env": "TEST_SUMMARIZER_KEY"},
             "connectors": [
-                {"name": "agent-hermes", "type": "hermes", "options": {"state_db": str(db)}}
+                {
+                    "name": "agent-hermes",
+                    "type": "hermes",
+                    "options": {"state_db": str(db), "min_chars": 0},
+                }
             ],
         }
     )
@@ -117,7 +121,8 @@ def env(tmp_path, monkeypatch):
 
 
 def connector(db: Path, **kw) -> HermesConnector:
-    return HermesConnector("agent-hermes", {"state_db": str(db)}, max_segment_chars=10_000, **kw)
+    options = {"state_db": str(db), "min_chars": 0}  # the synthetic sessions are short
+    return HermesConnector("agent-hermes", options, max_segment_chars=10_000, **kw)
 
 
 def test_collect_filters_defers_and_cleans(env) -> None:

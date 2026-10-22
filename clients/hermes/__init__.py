@@ -3,8 +3,9 @@
 - Tools `jezero_search`, `jezero_get_item`, `jezero_later`, `jezero_timeline` and
   `jezero_list_sources` call the Jezero MCP server with this computer's key. They only
   appear once the computer is connected (`core/jezero_client.py init`).
-- First turn of a session: recent work of the project and related past work, when it
-  really matches, are added to the user's message (Hermes keeps the system prompt stable).
+- First turn of a session: the Jezero protocol (how to use the tools by habit), recent
+  work of the project and related past work, when it really matches, are added to the
+  user's message (Hermes keeps the system prompt stable). Nothing without a key.
 - End of a turn (at most every 10 minutes per session) and when a session closes: the
   session is exported from Hermes' state.db and uploaded in the background, unless the
   computer only reads Jezero (`init --no-upload`).
@@ -37,6 +38,7 @@ TOOL_TIMEOUT = 20.0
 _core_module: Any = None
 _core_lock = threading.Lock()
 _last_export: dict[str, float] = {}
+_protocol_given: dict[str, float] = {}
 
 
 def _core() -> Any:
@@ -206,13 +208,39 @@ def _pre_llm_call(
             parts.append(related)
     except Exception as exc:  # noqa: BLE001 - offline server: no context, no failure
         core.log(f"hermes pre_llm_call: {exc!r}")
-    if not parts:
-        return None
-    head = (
-        "Jezero (shared memory of past work; check with jezero_get_item and jezero_later"
-        " before relying on it):"
+    out: list[str] = []
+    if _first_protocol(session_id):
+        out.append(protocol())
+    if parts:
+        head = (
+            "Jezero (shared memory of past work; check with jezero_get_item and jezero_later"
+            " before relying on it):"
+        )
+        out += [head, *parts]
+    return {"context": "\n\n".join(out)} if out else None
+
+
+def protocol() -> str:
+    """The core's protocol, with the names the tools have in Hermes."""
+    return (
+        _core()
+        .PROTOCOL.replace("the jezero `search` tool", "the `jezero_search` tool")
+        .replace("call `later` on", "call `jezero_later` on")
+        .replace("`get_item`", "`jezero_get_item`")
     )
-    return {"context": "\n\n".join([head, *parts])}
+
+
+def _first_protocol(session_id: str) -> bool:
+    """Once per session (a session id may come back after a context compression)."""
+    if not session_id:
+        return True
+    if session_id in _protocol_given:
+        return False
+    _protocol_given[session_id] = time.time()
+    if len(_protocol_given) > 500:
+        for key in sorted(_protocol_given, key=lambda k: _protocol_given[k])[:-250]:
+            _protocol_given.pop(key, None)
+    return True
 
 
 def _send(session_id: str) -> None:

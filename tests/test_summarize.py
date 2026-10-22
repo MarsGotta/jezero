@@ -227,6 +227,6 @@ def test_parse_caps_lists() -> None:
             "atoms": [{"kind": "fact", "text": f"a{i}"} for i in range(30)],
         }
     )
-    assert len(result.title) == 200
-    assert len(result.questions) == 8
-    assert len(result.atoms) == 16
+    assert len(result.title) == summarize_module.MAX_TITLE_CHARS == 200
+    assert len(result.questions) == summarize_module.MAX_QUESTIONS == 6
+    assert len(result.atoms) == summarize_module.MAX_ATOMS == 12

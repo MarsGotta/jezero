@@ -11,6 +11,7 @@ import ipaddress
 import os
 import re
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -175,8 +176,9 @@ class ConnectorConfig(_Strict):
     """How often `jezero run --due` runs it."""
     project: str | None = None
     """Default project for items from this source, when the connector cannot infer one."""
-    trust: Literal["own", "external"] = "own"
-    """`own` for your agents' work; `external` for text written by others (mail)."""
+    trust: Literal["own", "external"] | None = None
+    """`own` for your agents' work; `external` for text written by others (mail).
+    Default: the connector type's own default (`external` for gmail, `own` otherwise)."""
     options: dict[str, Any] = Field(default_factory=dict)
     """Type-specific settings (paths, filters). Secrets go through *_env keys only."""
 
@@ -186,6 +188,42 @@ class ConnectorConfig(_Strict):
         if not _NAME_RE.fullmatch(value):
             raise ValueError("connector name must be lowercase letters, digits, - or _")
         return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_type(cls, data: Any) -> Any:
+        """At load: fill `trust` from the type when unset; refuse types that cannot run.
+
+        Entries passed as already-built objects are left alone (see `effective_trust`).
+        """
+        if not isinstance(data, dict):
+            return data
+        from .connectors import CONNECTOR_TYPES
+
+        kind = CONNECTOR_TYPES.get(str(data.get("type")))
+        if kind is None:
+            return data  # Config reports unknown types with the list of known ones
+        name = data.get("name")
+        if kind.status == "available" and kind.build is None:
+            how = (
+                "use `jezero import-jsonl` instead of a [[connectors]] entry"
+                if kind.name == "jsonl"
+                else "it cannot run on a schedule"
+            )
+            raise ValueError(f"connector {name!r}: {kind.name} is import-only: {how}")
+        if data.get("trust") is None:
+            data = {**data, "trust": kind.default_trust}
+        return data
+
+    @property
+    def effective_trust(self) -> Literal["own", "external"]:
+        """`trust`, or the type's default when the entry was built without validation."""
+        if self.trust is not None:
+            return self.trust
+        from .connectors import CONNECTOR_TYPES
+
+        kind = CONNECTOR_TYPES.get(self.type)
+        return kind.default_trust if kind is not None else "own"
 
     @field_validator("options")
     @classmethod
@@ -260,6 +298,19 @@ class Config(_Strict):
             dupes = {n for n in names if names.count(n) > 1}
             if dupes:
                 raise ValueError(f"duplicate {label} names: {sorted(dupes)}")
+        # Two clients with one key would make the key's owner ambiguous.
+        for field in ("token_sha256", "token_env"):
+            seen: dict[str, str] = {}
+            for client in self.clients:
+                value = getattr(client, field)
+                if value is None:
+                    continue
+                if value in seen:
+                    raise ValueError(
+                        f"clients {seen[value]!r} and {client.name!r} share the same {field}; "
+                        "every client needs its own key"
+                    )
+                seen[value] = client.name
         if self.search.default_limit > self.search.max_limit:
             raise ValueError("search.default_limit cannot exceed search.max_limit")
         from .connectors import CONNECTOR_TYPES
@@ -344,6 +395,167 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
 
 def _walk_keys(value: Any) -> list[str]:
     return [k for k, _ in _walk_items(value)]
+
+
+# -- editing the config file in place ---------------------------------------------------
+#
+# The admin commands (`jezero device revoke`, `rotate`) change one [[clients]] or
+# [[connectors]] entry and must leave every other byte of the file alone, comments
+# included. tomllib cannot write, so the edit is line-based and checked twice: the file
+# is parsed to match blocks to entries, and the result is loaded and validated before it
+# replaces the original (a timestamped backup is kept next to it).
+
+_HEADER_RE = re.compile(
+    r"^\s*(\[\[?)\s*([A-Za-z0-9_-]+(?:\s*\.\s*[A-Za-z0-9_-]+)*)\s*\]\]?\s*(?:#.*)?$"
+)
+
+
+class ConfigEditError(ValueError):
+    """The config file could not be changed safely; it was left as it was."""
+
+
+@dataclass(frozen=True, slots=True)
+class TomlBlock:
+    """Lines of one `[[table]]` entry: header, own keys, then its sub-tables."""
+
+    start: int
+    """Index of the `[[table]]` header line."""
+    body_end: int
+    """Index of its first sub-table header (`[table.options]`), or `end`."""
+    end: int
+    """One past its last key line. Comments and blank lines after it stay with what follows."""
+
+
+@dataclass(frozen=True, slots=True)
+class _Edit:
+    start: int
+    end: int
+    lines: list[str]
+
+
+class ConfigEditor:
+    """Line-level edits of `[[clients]]` and `[[connectors]]` entries, found by name."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.text = path.read_text(encoding="utf-8")
+        self.lines = self.text.splitlines(keepends=True)
+        self.data = tomllib.loads(self.text)
+        self._edits: list[_Edit] = []
+
+    def _blocks(self, table: str) -> list[TomlBlock]:
+        headers = [
+            (i, m.group(1), re.sub(r"\s+", "", m.group(2)))
+            for i, line in enumerate(self.lines)
+            if (m := _HEADER_RE.match(line))
+        ]
+        blocks: list[TomlBlock] = []
+        for n, (start, brackets, name) in enumerate(headers):
+            if brackets != "[[" or name != table:
+                continue
+            body_end = stop = len(self.lines)
+            for index, _, other in headers[n + 1 :]:
+                if other.startswith(table + "."):
+                    body_end = min(body_end, index)
+                    continue
+                stop = index
+                break
+            end = stop
+            while end > start + 1 and self.lines[end - 1].strip()[:1] in ("", "#"):
+                end -= 1
+            blocks.append(TomlBlock(start, min(body_end, end), end))
+        return blocks
+
+    def find(self, table: str, name: str) -> TomlBlock | None:
+        """The block of the entry called `name`, or None."""
+        entries = self.data.get(table, [])
+        blocks = self._blocks(table)
+        if not isinstance(entries, list) or len(blocks) != len(entries):
+            raise ConfigEditError(
+                f"could not match every {table} entry to a [[{table}]] block in {self.path} "
+                "(inline tables?); edit the file by hand"
+            )
+        for block, entry in zip(blocks, entries, strict=True):
+            if isinstance(entry, dict) and entry.get("name") == name:
+                return block
+        return None
+
+    def remove(self, block: TomlBlock, *, comment_above: str | None = None) -> None:
+        """Drop the block; also a comment line just above it that matches
+        `comment_above`, and one blank line before that, so no gap is left behind."""
+        start = block.start
+        if comment_above and start > 0 and re.match(comment_above, self.lines[start - 1]):
+            start -= 1
+        if start > 0 and not self.lines[start - 1].strip():
+            start -= 1
+        self._edits.append(_Edit(start, block.end, []))
+
+    def set_value(self, block: TomlBlock, key: str, value: str) -> None:
+        """Set `key = value` (value already in TOML syntax) among the block's own keys,
+        keeping any comment at the end of the line; added before its sub-tables if absent."""
+        pattern = re.compile(
+            rf"^(\s*{re.escape(key)}\s*=\s*)(\"[^\"\n]*\"|'[^'\n]*'|true|false|[0-9]+)(.*)$",
+            re.DOTALL,
+        )
+        for index in range(block.start + 1, block.body_end):
+            if re.match(rf"^\s*{re.escape(key)}\s*=", self.lines[index]):
+                found = pattern.match(self.lines[index])
+                if found is None:
+                    raise ConfigEditError(
+                        f"cannot edit the {key} line at {index + 1}; edit by hand"
+                    )
+                line = found.group(1) + value + found.group(3)
+                self._edits.append(_Edit(index, index + 1, [line]))
+                return
+        self._edits.append(_Edit(block.body_end, block.body_end, [f"{key} = {value}\n"]))
+
+    def result(self) -> str:
+        lines = list(self.lines)
+        for edit in sorted(self._edits, key=lambda e: (e.start, e.end), reverse=True):
+            if edit.lines and edit.start == len(lines) and lines and not lines[-1].endswith("\n"):
+                lines[-1] += "\n"
+            lines[edit.start : edit.end] = edit.lines
+        return "".join(lines)
+
+    def commit(self) -> tuple[Config, Path]:
+        """Validate the edited text, back the file up, replace it, load it again.
+
+        Returns the new config and the backup's path. On any failure the original file
+        stays (or is put back) and ConfigEditError explains why.
+        """
+        import shutil
+        import tempfile
+        from datetime import UTC, datetime
+
+        new_text = self.result()
+        folder = self.path.parent
+        fd, tmp_name = tempfile.mkstemp(dir=folder, prefix=".jezero-edit-", suffix=".toml")
+        tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(new_text)
+            shutil.copymode(self.path, tmp)
+            try:
+                load_config(tmp)
+            except Exception as exc:  # noqa: BLE001  report any reason, change nothing
+                raise ConfigEditError(f"the edited config would not load: {exc}") from exc
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+            backup = folder / f"{self.path.name}.bak-{stamp}"
+            n = 1
+            while backup.exists():
+                backup = folder / f"{self.path.name}.bak-{stamp}-{n}"
+                n += 1
+            shutil.copy2(self.path, backup)
+            os.replace(tmp, self.path)
+        finally:
+            tmp.unlink(missing_ok=True)
+        try:
+            return load_config(self.path), backup
+        except Exception as exc:  # noqa: BLE001
+            restore = folder / f".jezero-restore-{os.getpid()}"
+            shutil.copy2(backup, restore)
+            os.replace(restore, self.path)
+            raise ConfigEditError(f"the edited config did not load, restored {backup}") from exc
 
 
 def _walk_items(value: Any) -> list[tuple[str, Any]]:

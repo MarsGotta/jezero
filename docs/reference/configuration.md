@@ -130,7 +130,7 @@ One configured source. `type` selects the implementation, `name` identifies it.
 | `enabled` | boolean | `true` | Disabled connectors keep their cursor and are skipped by `jezero run`. |
 | `interval_minutes` | integer (≥ 1) | `15` | How often `jezero run --due` runs it. |
 | `project` | string (optional) | none | Default project for items from this source, when the connector cannot infer one. |
-| `trust` | `"own"` \| `"external"` | `"own"` | `own` for your agents' work; `external` for text written by others (mail). |
+| `trust` | `"own"` \| `"external"` (optional) | none | `own` for your agents' work; `external` for text written by others (mail). Default: the connector type's own default (`external` for gmail, `own` otherwise). |
 | `options` | table of any | empty | Type-specific settings (paths, filters). Secrets go through *_env keys only. |
 
 ## inbox

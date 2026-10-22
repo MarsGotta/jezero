@@ -64,7 +64,8 @@ class NewItem:
     """Pointer to the original (path, URL) when it is not stored inline."""
     trust: Trust = "own"
     content_hash: str = ""
-    """Hash of the raw source content. Unchanged hash means nothing to re-summarise."""
+    """Hash of the redacted source text the summary was made from (what the pipeline
+    compares). Unchanged hash means nothing to re-summarise."""
 
     def __post_init__(self) -> None:
         self.occurred_at = utc(self.occurred_at)

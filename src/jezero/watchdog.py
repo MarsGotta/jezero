@@ -12,6 +12,7 @@ covers the scheduler itself dying.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -22,11 +23,13 @@ from .config import Config
 from .connectors import CONNECTOR_TYPES
 from .store import Store
 
+log = logging.getLogger(__name__)
+
 
 @dataclass(slots=True)
 class ConnectorHealth:
     connector: str
-    status: str  # ok | stale | failing | never
+    status: str  # ok | stale | failing | never (enabled, no run yet)
     last_success_at: str | None
     hours_since_success: float | None
     last_error: str | None
@@ -48,7 +51,8 @@ def evaluate(config: Config, store: Store, *, now: datetime | None = None) -> li
         if state.last_success_at:
             since = now - datetime.fromisoformat(state.last_success_at)
         if since is None:
-            status = "never"
+            # Never succeeded: "failing" when a run already tried and left an error.
+            status = "failing" if state.last_error else "never"
         elif since > limit:
             status = "stale"
         elif state.last_error:
@@ -74,8 +78,13 @@ def alert(
     *,
     now: datetime | None = None,
     transport: httpx.BaseTransport | None = None,
+    errors: list[str] | None = None,
 ) -> list[str]:
-    """POST one alert per unhealthy connector not alerted recently. Returns names alerted."""
+    """POST one alert per unhealthy connector not alerted recently. Returns names alerted.
+
+    A webhook that cannot be reached is logged (and appended to `errors`, if given) and
+    stops the alerts for this check; it never raises, so the heartbeat still goes out.
+    """
     env = config.watchdog.alert_webhook_env
     url = os.environ.get(env) if env else None
     if not url:
@@ -83,6 +92,7 @@ def alert(
     now = now or datetime.now(UTC)
     gap = timedelta(hours=config.watchdog.realert_hours)
     sent = []
+    unreachable = False
     with httpx.Client(timeout=15, transport=transport) as http:
         for entry in report:
             key = f"watchdog.last_alert.{entry.connector}"
@@ -90,7 +100,7 @@ def alert(
                 store.set_meta(key, None)  # recovered: the next problem alerts at once
                 continue
             last = store.get_meta(key)
-            if last and now - datetime.fromisoformat(last) < gap:
+            if unreachable or (last and now - datetime.fromisoformat(last) < gap):
                 continue
             text = (
                 f"jezero: connector {entry.connector} is {entry.status}"
@@ -101,7 +111,15 @@ def alert(
                 )
                 + (f": {entry.last_error[:300]}" if entry.last_error else "")
             )
-            resp = http.post(url, json={"text": text, **asdict(entry)})
+            try:
+                resp = http.post(url, json={"text": text, **asdict(entry)})
+            except (httpx.HTTPError, httpx.InvalidURL) as exc:
+                problem = f"alert webhook failed: {type(exc).__name__}"
+                log.warning("%s: %s", problem, exc)
+                if errors is not None:
+                    errors.append(problem)
+                unreachable = True  # no more posts this check; the next one tries again
+                continue
             if resp.status_code < 400:
                 store.set_meta(key, now.isoformat())
                 sent.append(entry.connector)

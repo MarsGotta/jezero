@@ -124,7 +124,7 @@ class Backend(Protocol):
     def overview(self, days: int = 14) -> dict[str, Any]: ...
     def search(self, query: str, project: str | None = None, limit: int = 20) -> list[dict]: ...
     def item(self, item_id: int, original: bool = False) -> dict[str, Any] | None: ...
-    def later(self, item_id: int, query: str | None = None) -> list[dict]: ...
+    def later(self, item_id: int, query: str | None = None) -> tuple[list[dict], str]: ...
     def timeline(self, project: str | None = None, limit: int = 40) -> list[dict]: ...
     def agents(self) -> list[AgentStatus]: ...
     def context(self, project: str | None, prompt: str) -> dict[str, str]: ...
@@ -186,11 +186,14 @@ class RemoteBackend:
         data = self._call("get_item", {"item_id": item_id, "include_original": original}) or {}
         return data.get("item") if data.get("found") else None
 
-    def later(self, item_id: int, query: str | None = None) -> list[dict]:
+    def later(self, item_id: int, query: str | None = None) -> tuple[list[dict], str]:
+        """Newer items, and how the server found them: "subject", or "project_timeline"
+        when nothing later matched the subject and the project's newer items came back."""
         args: dict[str, Any] = {"item_id": item_id}
         if query:
             args["query"] = query
-        return list((self._call("later", args) or {}).get("later") or [])
+        data = self._call("later", args) or {}
+        return list(data.get("later") or []), str(data.get("matched_by") or "subject")
 
     def timeline(self, project: str | None = None, limit: int = 40) -> list[dict]:
         args: dict[str, Any] = {"limit": limit}
@@ -261,12 +264,26 @@ def detect_agents(home: Path | None = None) -> list[AgentStatus]:
         claude_dir / "plugins" / "cache" / "jezero", "*/*/core/jezero_client.py"
     )
     notes = []
-    claude_json = home / ".claude.json"
     try:
-        if "jezero" in (json.loads(claude_json.read_text()).get("mcpServers") or {}):
-            notes.append("MCP server registered")
-    except (OSError, ValueError):
+        if '"jezero@' in (claude_dir / "plugins" / "installed_plugins.json").read_text():
+            notes.append("MCP via plugin")
+    except OSError:
         pass
+    # User-scope MCP servers: $CLAUDE_CONFIG_DIR/.claude.json, else ~/.claude.json.
+    claude_jsons = [home / ".claude.json"]
+    if env.get("CLAUDE_CONFIG_DIR"):
+        claude_jsons.insert(0, Path(env["CLAUDE_CONFIG_DIR"]) / ".claude.json")
+    for claude_json in claude_jsons:
+        try:
+            entry = (json.loads(claude_json.read_text()).get("mcpServers") or {}).get("jezero")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(entry, dict):
+            if entry.get("type") == "http" or "headers" in entry:
+                notes.append("old MCP entry with the key in clear: run setup")
+            elif "MCP via plugin" not in notes:
+                notes.append("MCP server registered")
+            break
     out.append(_status("claude-code", version, path, latest, notes))
 
     codex_dir = Path(env.get("CODEX_HOME") or home / ".codex")
@@ -277,7 +294,11 @@ def detect_agents(home: Path | None = None) -> list[AgentStatus]:
     try:
         text = (codex_dir / "config.toml").read_text()
         if "[mcp_servers.jezero]" in text:
-            notes.append("MCP server registered")
+            block = text.split("[mcp_servers.jezero]", 1)[1].split("\n[", 1)[0]
+            old = re.search(r"(?m)^\s*(url|http_headers)\s*=", block)
+            notes.append(
+                "old MCP entry with the key in clear: run setup" if old else "MCP server registered"
+            )
         if version is None and "jezero" in text:
             version = "?"
     except OSError:
@@ -337,10 +358,17 @@ def _status(
     )
 
 
+def _agent_source(source: str, agent: str) -> bool:
+    """`agent-<agent>-<device>` (uploads from a computer) or `agent-<agent>` (read on the
+    server itself)."""
+    return source == f"agent-{agent}" or source.startswith(f"agent-{agent}-")
+
+
 def last_seen(sources: dict[str, Any], agent: str) -> str | None:
-    prefix = f"agent-{agent}-"
     dates = [
-        str(v.get("latest")) for k, v in sources.items() if k.startswith(prefix) and v.get("latest")
+        str(v.get("latest"))
+        for k, v in sources.items()
+        if _agent_source(k, agent) and v.get("latest")
     ]
     return max(dates) if dates else None
 
@@ -530,10 +558,12 @@ class DemoBackend:
                 return item
         return None
 
-    def later(self, item_id: int, query: str | None = None) -> list[dict]:
+    def later(self, item_id: int, query: str | None = None) -> tuple[list[dict], str]:
         if item_id == 2390:
-            return [self._item(_DEMO_ITEMS[0])]
-        return []
+            return [self._item(_DEMO_ITEMS[0])], "subject"
+        if item_id == 2377:  # nothing on its subject: the project's newer work, by date
+            return [self._item(_DEMO_ITEMS[2])], "project_timeline"
+        return [], "subject"
 
     def timeline(self, project: str | None = None, limit: int = 40) -> list[dict]:
         items = [self._item(r) for r in _DEMO_ITEMS if project in (None, r["project"])]
@@ -617,8 +647,8 @@ def ago(value: Any, now: datetime | None = None, short: bool = False) -> str:
 
 
 def source_agent(source: str) -> str | None:
-    """`agent-claude-code-laptop` -> `claude-code`."""
+    """`agent-claude-code-laptop` (or `agent-claude-code`) -> `claude-code`."""
     for agent in sorted(AGENT_NAMES, key=len, reverse=True):
-        if source.startswith(f"agent-{agent}-"):
+        if _agent_source(source, agent):
             return agent
     return None

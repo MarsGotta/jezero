@@ -27,7 +27,10 @@ from .base import (
     ConnectorType,
     PromptCleaner,
     RawDoc,
+    require_dir,
+    require_file,
     segment,
+    whole_session,
 )
 
 if TYPE_CHECKING:
@@ -68,8 +71,7 @@ class OpenCodeConnector:
         self.default_project = default_project
 
     def _connect(self) -> sqlite3.Connection:
-        if not self.db_path.is_file():
-            raise FileNotFoundError(f"OpenCode database not found: {self.db_path}")
+        require_file("db_path", self.db_path)
         return sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
 
     def collect(
@@ -119,8 +121,7 @@ class OpenCodeConnector:
         self, state: ConnectorState, *, limit: int | None, sample: int | None, now: float
     ) -> Batch:
         assert self.export_dir is not None
-        if not self.export_dir.is_dir():
-            return Batch(docs=[], next_cursor=None, deferred=0)
+        require_dir("export_dir", self.export_dir)
         settled_before = now - self.settle_seconds
         cursor = float(state.cursor) if state.cursor and sample is None else 0.0
         candidates = []
@@ -236,7 +237,7 @@ class OpenCodeConnector:
                     meta={"agents": agents, "models": models, "part": number, "parts": len(parts)},
                 )
             )
-        return docs, True
+        return whole_session(session_id, docs), True
 
     def _render(self, role: str, part: dict[str, Any], stamp: float) -> str:
         when = datetime.fromtimestamp(stamp, UTC).strftime("%Y-%m-%d %H:%M")

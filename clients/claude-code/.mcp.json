@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "jezero": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/core/jezero_client.py", "mcp", "--agent", "claude-code"]
+    }
+  }
+}

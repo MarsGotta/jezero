@@ -5,13 +5,15 @@ and Hermes Agent.
 The plugins are thin. Each one only maps its agent's events to a command of this file
 (the Hermes plugin imports it and calls the same functions):
 
-    session-start   print the Jezero protocol and recent work of this project (context)
+    session-start   print the Jezero protocol and recent work of this project (context);
+                    nothing on a computer without a key
     user-prompt     on the first prompt of a session, print past work that matches it
     stop            note the session transcript and upload it in the background (throttled)
     session-end     same, without throttling
 
 Other commands: init (create this device's key), status, setup (register the MCP server in
-the agents), flush (upload what is queued), backfill (queue existing sessions), protocol.
+the agents), mcp (stdio MCP bridge that holds the key), flush (upload what is queued),
+backfill (queue existing sessions), protocol.
 
 A computer set up with `init --no-upload` only reads Jezero: hooks give context, nothing
 is queued or uploaded (for the computer that runs the server, whose sessions the
@@ -40,10 +42,11 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 AGENT_HOME_VARS = ("CLAUDE_CONFIG_DIR", "CODEX_HOME")
+AGENT_HOME_VAR = {"claude-code": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}
 
 
 def client_home() -> Path:
@@ -72,14 +75,28 @@ def use_home(home: Path) -> None:
     CA_FILE = HOME / "ca.pem"
 
 
+def agent_home(agent: str | None) -> Path:
+    """The client home of one agent: `JEZERO_CLIENT_HOME`; else the `jezero` folder in that
+    agent's own config folder when it holds a key (`$CLAUDE_CONFIG_DIR/jezero`,
+    `$CODEX_HOME/jezero`, or `~/.gemini/config/jezero` for Antigravity, whose sandboxed
+    agents may see that folder but not `~/.jezero`); else `client_home()`."""
+    explicit = os.environ.get("JEZERO_CLIENT_HOME")
+    if explicit:
+        return Path(explicit).expanduser()
+    own: Path | None = None
+    if agent == "antigravity":
+        own = Path.home() / ".gemini" / "config" / "jezero"
+    elif agent in AGENT_HOME_VAR and os.environ.get(AGENT_HOME_VAR[agent]):
+        own = Path(os.environ[AGENT_HOME_VAR[agent]]).expanduser() / "jezero"
+    if own is not None and (own / "client.json").is_file():
+        return own
+    return client_home()
+
+
 def use_agent_home(agent: str | None) -> None:
-    """Antigravity keeps its own key in `~/.gemini/config/jezero` when one is there: agents
-    run in a sandbox may see Antigravity's folder but not `~/.jezero`."""
-    if agent != "antigravity" or os.environ.get("JEZERO_CLIENT_HOME"):
-        return
-    home = Path.home() / ".gemini" / "config" / "jezero"
-    if (home / "client.json").is_file():
-        use_home(home)
+    """Point every client file at `agent_home(agent)`; without an agent nothing changes."""
+    if agent:
+        use_home(agent_home(agent))
 
 
 HOME = CONFIG = TOKEN_FILE = SPOOL = STATE = LOG = CA_FILE = Path()
@@ -91,6 +108,9 @@ HOOK_TIMEOUT = float(os.environ.get("JEZERO_HOOK_TIMEOUT", "2.5"))
 STOP_THROTTLE_SECONDS = 15 * 60
 RECENT_ITEMS = 5
 PROMPT_HITS = 3
+DEFAULT_MCP_PATH = "/mcp"
+STATE_LIMITS = {"uploaded": 2000, "rejected": 500, "stop_flush": 500, "prompted": 500}
+"""Entries kept in state.json per table (the newest ones): it must not grow forever."""
 
 PROTOCOL = """\
 ## Jezero: shared memory of past work (read-only)
@@ -157,6 +177,45 @@ def _save_json(path: Path, data: Any) -> None:
     os.replace(str(tmp), str(path))
 
 
+def _stamp(value: Any) -> float:
+    """When a state entry was written: a time, an upload mark [mtime, size] or a record."""
+    if isinstance(value, dict):
+        value = value.get("at")
+    elif isinstance(value, list):
+        value = value[0] if value else 0
+    return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+def _prune(state: dict[str, Any]) -> None:
+    for name, keep in STATE_LIMITS.items():
+        table = state.get(name)
+        if isinstance(table, dict) and len(table) > keep:
+            for key in sorted(table, key=lambda k: _stamp(table[k]))[:-keep]:
+                table.pop(key, None)
+
+
+def load_state() -> dict[str, Any]:
+    state = _load_json(STATE, {})
+    return state if isinstance(state, dict) else {}
+
+
+def update_state(change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+    """Read state.json again, apply `change`, prune and save (hooks and the uploader write
+    it at the same time, so never save a copy read long ago)."""
+    state = load_state()
+    change(state)
+    _prune(state)
+    _save_json(STATE, state)
+    return state
+
+
+def _table(state: dict[str, Any], name: str) -> dict[str, Any]:
+    table = state.get(name)
+    if not isinstance(table, dict):
+        table = state[name] = {}
+    return table
+
+
 # ----------------------------------------------------------------------------- http
 
 
@@ -208,7 +267,8 @@ def _is_cert_error(exc: urllib.error.URLError) -> bool:
 def export_system_roots() -> bool:
     """macOS: Python may not trust the system's certificates (python.org builds ship none,
     and company networks add their own root to the keychain). Export the keychains' roots
-    to ~/.jezero/ca.pem once and use them from then on. False if nothing changed."""
+    to `ca.pem` in the client home (`~/.jezero` unless the key lives elsewhere, see
+    `client_home`) once and use them from then on. False if nothing changed."""
     if sys.platform != "darwin" or CA_FILE.is_file() or os.environ.get("JEZERO_CA_FILE"):
         return False
     keychains = [
@@ -236,6 +296,18 @@ def export_system_roots() -> bool:
     return True
 
 
+def mcp_path(value: Any) -> str:
+    """`mcp_path` as a URL path: one leading slash, no trailing one (default /mcp)."""
+    text = str(value or "").strip().strip("/")
+    return "/" + text if text else DEFAULT_MCP_PATH
+
+
+def mcp_url(cfg: dict[str, Any]) -> str:
+    """The server's MCP endpoint: `url` plus `mcp_path` from client.json (the server's
+    `[server].path`, /mcp unless its admin changed it)."""
+    return str(cfg["url"]).rstrip("/") + mcp_path(cfg.get("mcp_path"))
+
+
 def mcp_call(cfg: dict[str, Any], tool: str, args: dict[str, Any], timeout: float) -> Any:
     """Call one tool of the Jezero MCP server (stateless JSON-RPC over HTTP)."""
     payload = {
@@ -246,7 +318,7 @@ def mcp_call(cfg: dict[str, Any], tool: str, args: dict[str, Any], timeout: floa
     }
     status, raw = _http(
         "POST",
-        cfg["url"].rstrip("/") + "/mcp",
+        mcp_url(cfg),
         cfg["token"],
         body=json.dumps(payload).encode(),
         headers={
@@ -279,7 +351,7 @@ except ImportError:  # running from the repository
 
 
 def project_rules() -> ProjectRules:
-    """`projects` in ~/.jezero/client.json: paths, roots, aliases, git (all optional)."""
+    """`projects` in client.json: paths, roots, aliases, git (all optional)."""
     data = _load_json(CONFIG, {})
     return ProjectRules.from_dict(data.get("projects") if isinstance(data, dict) else None)
 
@@ -504,13 +576,16 @@ def enqueue(agent: str, session_id: str, transcript: str, cwd: str | None) -> bo
 
 
 def spawn_flush() -> None:
-    """Upload in a detached process so the agent never waits for the network."""
+    """Upload in a detached process so the agent never waits for the network. The child
+    gets this home explicitly: a key kept in an agent's own folder (Antigravity, sandboxes)
+    is not where a plain `flush` would look."""
     try:
         kwargs: dict[str, Any] = {
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
             "close_fds": True,
+            "env": {**os.environ, "JEZERO_CLIENT_HOME": str(HOME)},
         }
         if os.name == "nt":
             kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED | NEW_GROUP
@@ -550,7 +625,18 @@ class _Lock:
                 self.path.unlink()
 
 
+class KeyRefused(RuntimeError):
+    """HTTP 401/403: the key is not approved yet, or not allowed to upload. The queue stays:
+    once the admin approves the key for uploads, the files go out."""
+
+
+class Rejected(RuntimeError):
+    """HTTP 400/413/415: the server will never accept this file as it is."""
+
+
 def upload(cfg: dict[str, Any], agent: str, path: Path, project: str | None = None) -> bool:
+    """Send one file. True when sent (or nothing to send); raises `KeyRefused`, `Rejected`,
+    or another error when the server is down."""
     relpath = relpath_for(agent, path)
     if relpath is None:
         return True  # nothing to send, not an error
@@ -570,26 +656,34 @@ def upload(cfg: dict[str, Any], agent: str, path: Path, project: str | None = No
     )
     if status == 200:
         return True
-    log(f"upload {agent} {relpath}: HTTP {status} {raw[:200]!r}")
-    if status in (400, 403, 413, 415):
-        return True  # the server will never accept this file (or uploads are off): drop it
-    raise RuntimeError(f"HTTP {status}")
+    detail = " ".join(raw[:200].decode("utf-8", "replace").split())
+    reason = f"HTTP {status} {detail}".strip()
+    if status in (401, 403):
+        raise KeyRefused(reason)
+    if status in (400, 413, 415):
+        raise Rejected(reason)
+    raise RuntimeError(reason)
 
 
 def flush(cfg: dict[str, Any]) -> dict[str, int]:
-    counts = {"sent": 0, "unchanged": 0, "gone": 0, "failed": 0}
+    """Upload the queue in order. Offline, a server error or a refused key stop the run and
+    keep the queue; a file the server rejects is dropped and recorded as rejected."""
+    counts = {"sent": 0, "unchanged": 0, "gone": 0, "failed": 0, "rejected": 0}
     with _Lock(SPOOL / "flush.lock") as lock:
         if not lock.held:
             return counts
-        state = _load_json(STATE, {})
-        uploaded: dict[str, list[float]] = state.setdefault("uploaded", {})
-        pending = sorted((SPOOL / "pending").glob("*.json"))
-        for pointer_file in pending:
+        state = load_state()
+        uploaded = _table(state, "uploaded")
+        rejected = _table(state, "rejected")
+        refused: str | None = None
+        for pointer_file in sorted((SPOOL / "pending").glob("*.json")):
             pointer = _load_json(pointer_file, None)
-            if not pointer:
-                pointer_file.unlink()
+            if not isinstance(pointer, dict) or not pointer.get("path"):
+                with contextlib.suppress(OSError):
+                    pointer_file.unlink()
                 continue
             path = Path(pointer["path"])
+            key = str(path)
             try:
                 stat = path.stat()
             except OSError:
@@ -597,22 +691,62 @@ def flush(cfg: dict[str, Any]) -> dict[str, int]:
                 pointer_file.unlink()
                 continue
             mark = [stat.st_mtime, float(stat.st_size)]
-            if uploaded.get(str(path)) == mark:
+            old_reject = rejected.get(key)
+            if uploaded.get(key) == mark or (
+                isinstance(old_reject, dict) and old_reject.get("mark") == mark
+            ):
                 counts["unchanged"] += 1
                 pointer_file.unlink()
                 continue
             try:
                 upload(cfg, pointer["agent"], path, pointer.get("project"))
+            except KeyRefused as exc:
+                counts["failed"] += 1
+                refused = str(exc)
+                break  # the key may be approved for uploads later: keep the whole queue
+            except Rejected as exc:
+                counts["rejected"] += 1
+                entry = {
+                    "agent": pointer.get("agent"),
+                    "mark": mark,
+                    "reason": str(exc),
+                    "at": time.time(),
+                }
+                rejected[key] = entry
+                log(f"upload of {path.name} rejected ({exc}); not retried until it changes")
+                pointer_file.unlink()
+                update_state(lambda s, k=key, e=entry: _table(s, "rejected").__setitem__(k, e))
+                continue
             except (OSError, RuntimeError, urllib.error.URLError) as exc:
                 counts["failed"] += 1
                 log(f"flush stopped at {path.name}: {exc}")
                 break  # offline or server down: keep the queue for next time
-            uploaded[str(path)] = mark
+            uploaded[key] = mark
+            rejected.pop(key, None)
             counts["sent"] += 1
             pointer_file.unlink()
-            _save_json(STATE, state)
-        state["last_flush"] = time.time()
-        _save_json(STATE, state)
+
+            def sent(s: dict[str, Any], k: str = key, m: list[float] = mark) -> None:
+                _table(s, "uploaded")[k] = m
+                _table(s, "rejected").pop(k, None)
+                s.pop("refused", None)
+
+            update_state(sent)
+        before = state.get("refused")
+        if refused and not (isinstance(before, dict) and before.get("reason") == refused):
+            log(
+                f"uploads refused by the server ({refused}): the queue stays until the key "
+                "is approved for uploads (jezero device approve, without --read-only)"
+            )
+
+        def done(s: dict[str, Any]) -> None:
+            s["last_flush"] = time.time()
+            if refused:
+                old = s.get("refused")
+                same = isinstance(old, dict) and old.get("reason") == refused
+                s["refused"] = old if same else {"reason": refused, "at": time.time()}
+
+        update_state(done)
     return counts
 
 
@@ -634,29 +768,25 @@ def hook(event: str, agent: str, payload: dict[str, Any]) -> str:
     cwd = payload.get("cwd")
     try:
         if event == "session-start":
+            if not cfg:
+                return ""  # no key: the jezero tools are not there, so say nothing
             out = [PROTOCOL]
-            if cfg:
-                if uploads_enabled(cfg):
-                    spawn_flush()  # catch up sessions that never sent a session-end
-                try:
-                    context = recent_context(cfg, cwd)
-                except Exception as exc:  # noqa: BLE001 - never break the agent
-                    log(f"session-start context: {exc}")
-                    context = ""
-                if context:
-                    out.append(context)
+            if uploads_enabled(cfg):
+                spawn_flush()  # catch up sessions that never sent a session-end
+            try:
+                context = recent_context(cfg, cwd)
+            except Exception as exc:  # noqa: BLE001 - never break the agent
+                log(f"session-start context: {exc}")
+                context = ""
+            if context:
+                out.append(context)
             return "\n\n".join(out)
         if event == "user-prompt":
             if not cfg or not session:
                 return ""
-            state = _load_json(STATE, {})
-            seen = state.setdefault("prompted", {})
-            if session in seen:
+            if session in _table(load_state(), "prompted"):
                 return ""
-            seen[session] = time.time()
-            for key in sorted(seen, key=seen.get)[:-500]:
-                seen.pop(key)
-            _save_json(STATE, state)
+            update_state(lambda s: _table(s, "prompted").__setitem__(session, time.time()))
             return prompt_context(cfg, str(payload.get("prompt") or ""), cwd)
         if event in ("stop", "session-end"):
             if not uploads_enabled(cfg):
@@ -670,12 +800,10 @@ def hook(event: str, agent: str, payload: dict[str, Any]) -> str:
             if not enqueue(agent, session, str(transcript), cwd):
                 return ""
             if event == "stop":
-                state = _load_json(STATE, {})
-                last = state.setdefault("stop_flush", {})
-                if time.time() - last.get(session, 0) < STOP_THROTTLE_SECONDS:
+                last = _stamp(_table(load_state(), "stop_flush").get(session))
+                if time.time() - last < STOP_THROTTLE_SECONDS:
                     return ""
-                last[session] = time.time()
-                _save_json(STATE, state)
+                update_state(lambda s: _table(s, "stop_flush").__setitem__(session, time.time()))
             spawn_flush()
             return ""
     except Exception as exc:  # noqa: BLE001 - a hook must never break the agent
@@ -739,7 +867,8 @@ def _rpc_error(request_id: Any, message: str) -> str:
 
 def mcp_proxy(stdin: Any = None, stdout: Any = None) -> int:
     """A local stdio MCP server that forwards every message to the Jezero server with this
-    computer's key, so an agent's config never holds the key (Antigravity plugin)."""
+    computer's key, so an agent's config never holds the key (the Claude Code and
+    Antigravity plugins, and what `setup` registers in Claude Code and Codex)."""
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
     session: str | None = None
@@ -759,7 +888,10 @@ def mcp_proxy(stdin: Any = None, stdout: Any = None) -> int:
         cfg = load_config()
         replies: list[str] = []
         if cfg is None:
-            hint = "Jezero is not connected on this computer: run `jezero_client.py init`."
+            hint = (
+                f"Jezero is not connected on this computer (no key in {HOME}): "
+                "run `jezero_client.py init`."
+            )
             replies = [_rpc_error(i, hint) for i in ids]
         else:
             headers = {
@@ -772,7 +904,7 @@ def mcp_proxy(stdin: Any = None, stdout: Any = None) -> int:
             try:
                 status, raw = _http(
                     "POST",
-                    cfg["url"].rstrip("/") + "/mcp",
+                    mcp_url(cfg),
                     cfg["token"],
                     body=line.encode("utf-8"),
                     headers=headers,
@@ -801,24 +933,34 @@ def mcp_proxy(stdin: Any = None, stdout: Any = None) -> int:
 # -------------------------------------------------------------------------- install
 
 
-def init(url: str, device: str, force: bool, upload: bool = True) -> int:
+def init(
+    url: str, device: str, force: bool, upload: bool = True, mcp_path_: str | None = None
+) -> int:
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", device):
         print("device: lowercase letters, digits, - or _", file=sys.stderr)
         return 2
     if load_config() and not force:
         print(f"already set up ({CONFIG}); use --force to make a new key", file=sys.stderr)
         return 1
+    path = mcp_path(mcp_path_)
     url = url.rstrip("/")
-    if url.endswith("/mcp"):
-        url = url[: -len("/mcp")]
+    for suffix in dict.fromkeys((path, DEFAULT_MCP_PATH)):
+        if url.endswith(suffix) and len(url) > len(suffix):
+            url = url[: -len(suffix)]
+            break
     token = secrets.token_urlsafe(32)
     _write_private(TOKEN_FILE, token)
     config: dict[str, Any] = {"url": url, "device": device}
+    if path != DEFAULT_MCP_PATH:
+        config["mcp_path"] = path
     if not upload:
         config["upload"] = False
     _save_json(CONFIG, config)
     digest = hashlib.sha256(token.encode()).hexdigest()
-    print(f"Device key created in {HOME} (the key itself never leaves this computer).")
+    print(
+        f"Device key created. The key stays in {HOME}; "
+        "the server only keeps its SHA-256 fingerprint."
+    )
     if not upload:
         print("Read-only: this computer's sessions are not uploaded.")
     print("Ask the Jezero admin to approve it with:\n")
@@ -830,8 +972,9 @@ def init(url: str, device: str, force: bool, upload: bool = True) -> int:
 def status() -> int:
     cfg = load_config()
     if not cfg:
-        print("not set up: run `init` first")
+        print(f"not set up ({HOME}): run `init` first")
         return 1
+    print(f"key: {HOME}")
     if not uploads_enabled(cfg):
         try:
             sources = mcp_call(cfg, "list_sources", {}, 10)
@@ -841,16 +984,30 @@ def status() -> int:
         count = len(sources.get("sources", [])) if isinstance(sources, dict) else 0
         print(f"server {cfg['url']}: read-only, {count} readable sources")
         return 0
+    pending = len(list((SPOOL / "pending").glob("*.json")))
+    state = load_state()
+    rejected = sorted(
+        (v for v in _table(state, "rejected").values() if isinstance(v, dict)),
+        key=_stamp,
+        reverse=True,
+    )
+    refused = state.get("refused")
+    code = 1
     try:
         code, raw = _http(
             "GET", cfg["url"].rstrip("/") + "/inbox/v1/ping", cfg["token"], timeout=10
         )
+        print(f"server {cfg['url']}: HTTP {code} {raw.decode('utf-8', 'replace')}")
     except (OSError, urllib.error.URLError) as exc:
         print(f"cannot reach {cfg['url']}: {exc}")
-        return 1
-    pending = len(list((SPOOL / "pending").glob("*.json")))
-    print(f"server {cfg['url']}: HTTP {code} {raw.decode('utf-8', 'replace')}")
     print(f"queued sessions: {pending}")
+    if isinstance(refused, dict) and pending:
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(_stamp(refused)))
+        print(f"uploads refused since {when}: {refused.get('reason')} (the queue is kept)")
+    print(f"rejected uploads: {len(rejected)}")
+    for entry in rejected[:5]:
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(_stamp(entry)))
+        print(f"  {when} {entry.get('agent')}: {entry.get('reason')}")
     return 0 if code == 200 else 1
 
 
@@ -866,54 +1023,135 @@ def _installed_core() -> Path:
     return target
 
 
-def _setup_claude(cfg: dict[str, Any]) -> str:
+def _bridge(agent: str) -> list[str]:
+    """The command of the stdio MCP bridge (`mcp`), from a stable copy of this file."""
+    return ["python3", str(_installed_core()), "mcp", "--agent", agent]
+
+
+def _claude_dir() -> Path:
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser()
+
+
+def _claude_user_config() -> Path:
+    """Where `claude mcp add --scope user` writes."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR")
+    return (Path(base).expanduser() if base else Path("~").expanduser()) / ".claude.json"
+
+
+def claude_plugin_installed() -> bool:
+    """The Jezero plugin is installed in Claude Code (it brings its own MCP server)."""
+    try:
+        text = (_claude_dir() / "plugins" / "installed_plugins.json").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return '"jezero@' in text
+
+
+def _old_http_entry(entry: dict[str, Any]) -> bool:
+    """An MCP entry that reaches Jezero over HTTP with the key in the agent's config."""
+    return entry.get("type") in ("http", "sse") or "url" in entry or "headers" in entry
+
+
+def _setup_claude() -> str:
     exe = shutil.which("claude") or str(Path("~/.local/bin/claude").expanduser())
-    if not Path(exe).exists():
+    found = Path(exe).exists()
+    data = _load_json(_claude_user_config(), {})
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    entry = servers.get("jezero") if isinstance(servers, dict) else None
+    entry = entry if isinstance(entry, dict) else None
+    ours = entry is not None and (
+        _old_http_entry(entry) or "jezero_client.py" in " ".join(map(str, entry.get("args") or []))
+    )
+    remove = [exe, "mcp", "remove", "jezero", "--scope", "user"]
+    notes: list[str] = []
+    if entry is not None and ours and (claude_plugin_installed() or _old_http_entry(entry)):
+        what = (
+            "old user-scope jezero HTTP entry (it held the key in clear)"
+            if _old_http_entry(entry)
+            else "user-scope jezero entry (the plugin's own server replaces it)"
+        )
+        if not found:
+            return f"claude: remove the {what} with `claude mcp remove jezero --scope user`"
+        done = subprocess.run(remove, capture_output=True, text=True)
+        if done.returncode != 0:
+            return f"claude: could not remove the {what}: {done.stderr[-300:]}"
+        notes.append(f"removed the {what}")
+        entry = None
+    if claude_plugin_installed():
+        notes.insert(0, "the Jezero plugin brings the MCP server; nothing to register")
+        return "claude: " + "; ".join(notes)
+    if not found:
         return "claude: not found, skipped"
-    present = subprocess.run([exe, "mcp", "get", "jezero"], capture_output=True, text=True)
-    if present.returncode == 0:
-        return "claude: MCP server jezero already registered"
+    bridge = _bridge("claude-code")
+    env = {"JEZERO_CLIENT_HOME": str(HOME)} if os.environ.get("JEZERO_CLIENT_HOME") else {}
+    if entry is not None:
+        same = [entry.get("command"), *(entry.get("args") or [])] == bridge
+        if not ours or (same and (entry.get("env") or {}) == env):
+            return "claude: MCP server jezero already registered"
+        subprocess.run(remove, capture_output=True, text=True)
+        notes.append("updated the jezero entry")
+    flags = [w for k, v in env.items() for w in ("-e", f"{k}={v}")]
     result = subprocess.run(
-        [
-            exe,
-            "mcp",
-            "add",
-            "--scope",
-            "user",
-            "--transport",
-            "http",
-            "jezero",
-            cfg["url"].rstrip("/") + "/mcp",
-            "--header",
-            f"Authorization: Bearer {cfg['token']}",
-        ],
+        [exe, "mcp", "add", "--scope", "user", "jezero", *flags, "--", *bridge],
         capture_output=True,
         text=True,
     )
-    return (
-        "claude: MCP registered"
-        if result.returncode == 0
-        else f"claude: failed {result.stderr[-300:]}"
-    )
+    if result.returncode != 0:
+        return f"claude: failed {result.stderr[-300:]}"
+    notes.append(f"MCP server jezero registered (stdio bridge; the key stays in {HOME})")
+    return "claude: " + "; ".join(notes)
 
 
-def _setup_codex(cfg: dict[str, Any]) -> str:
+def _toml_table(text: str, name: str) -> tuple[int, int] | None:
+    """Where table `[name]` (with its sub-tables) sits in a TOML text, by characters."""
+    header = re.search(rf"(?m)^\[{re.escape(name)}\][ \t]*(#.*)?$", text)
+    if not header:
+        return None
+    for match in re.finditer(r"(?m)^\[\[?([^\]\n]+)\]", text[header.end() :]):
+        if not match.group(1).strip().startswith(name + "."):
+            return header.start(), header.end() + match.start()
+    return header.start(), len(text)
+
+
+def _setup_codex() -> str:
+    """Register the stdio bridge in Codex' config.toml, so the key never sits there.
+    Everything else in the file stays byte for byte."""
     home = Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
     if not home.exists() and not shutil.which("codex"):
         return "codex: not found, skipped"
     path = home / "config.toml"
     text = path.read_text(encoding="utf-8") if path.exists() else ""
-    if re.search(r"^\[mcp_servers\.jezero\]", text, re.M):
+    lines = [
+        "[mcp_servers.jezero]",
+        'command = "python3"',
+        "args = " + json.dumps(_bridge("codex")[1:]),
+    ]
+    if HOME.resolve() != Path("~/.jezero").expanduser().resolve():
+        # Codex passes only a few variables to MCP servers: name the key's folder.
+        lines.append(f"env = {{ JEZERO_CLIENT_HOME = {json.dumps(str(HOME))} }}")
+    block = "\n".join(lines) + "\n"
+    span = _toml_table(text, "mcp_servers.jezero")
+    if span is None:
+        sep = "" if not text else "\n" if text.endswith("\n") else "\n\n"
+        home.mkdir(parents=True, exist_ok=True)
+        path.write_text(text + sep + block, encoding="utf-8")
+        return f"codex: MCP server jezero added to config.toml (stdio bridge; key in {HOME})"
+    start, end = span
+    old = text[start:end]
+    body = old.rstrip()
+    if body + "\n" == block:
         return "codex: MCP server jezero already in config.toml"
-    block = (
-        "\n[mcp_servers.jezero]\n"
-        f'url = "{cfg["url"].rstrip("/")}/mcp"\n'
-        f'http_headers = {{ Authorization = "Bearer {cfg["token"]}" }}\n'
-    )
-    home.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(block)
-    return "codex: MCP added to config.toml"
+    http = bool(re.search(r"(?m)^\s*(url|http_headers|bearer_token\w*)\s*=", body))
+    if not http and "jezero_client.py" not in body:
+        return "codex: MCP server jezero already in config.toml (not Jezero's bridge; left as is)"
+    tail = old[len(body) :] or "\n"
+    path.write_text(text[:start] + block.rstrip("\n") + tail + text[end:], encoding="utf-8")
+    if http:
+        return (
+            "codex: replaced the old jezero entry in config.toml (it held the key in clear) "
+            "with the stdio bridge"
+        )
+    return "codex: MCP server jezero updated in config.toml"
 
 
 def _setup_opencode(plugin_source: Path | None) -> str:
@@ -940,30 +1178,37 @@ def _setup_opencode(plugin_source: Path | None) -> str:
 
 
 def setup(agents: list[str], opencode_plugin: str | None) -> int:
-    cfg = load_config()
-    if not cfg:
-        print("not set up: run `init` first", file=sys.stderr)
-        return 1
-    for agent in agents:
-        if agent == "claude-code":
-            print(_setup_claude(cfg))
-        elif agent == "codex":
-            print(_setup_codex(cfg))
-        elif agent == "opencode":
-            source = Path(opencode_plugin) if opencode_plugin else None
-            print(_setup_opencode(source))
-        elif agent == "antigravity":
-            print(
-                "antigravity: install the plugin with `agy plugin install "
-                "https://github.com/MarsGotta/jezero/tree/main/plugins/antigravity` "
-                "(it brings the MCP server, the skill and the hooks)"
-            )
-        elif agent == "hermes":
-            print(
-                "hermes: install the plugin with `hermes plugins install "
-                "MarsGotta/jezero/plugins/hermes --enable` (it brings its own tools)"
-            )
-    return 0
+    """Register Jezero in each agent, with that agent's own key (see `agent_home`)."""
+    original = HOME
+    code = 0
+    try:
+        for agent in agents:
+            use_agent_home(agent)
+            if load_config() is None:
+                print(f"{agent}: not set up ({HOME}): run `init` first", file=sys.stderr)
+                code = 1
+                continue
+            if agent == "claude-code":
+                print(_setup_claude())
+            elif agent == "codex":
+                print(_setup_codex())
+            elif agent == "opencode":
+                source = Path(opencode_plugin) if opencode_plugin else None
+                print(_setup_opencode(source))
+            elif agent == "antigravity":
+                print(
+                    "antigravity: install the plugin with `agy plugin install "
+                    "https://github.com/MarsGotta/jezero/tree/main/plugins/antigravity` "
+                    "(it brings the MCP server, the skill and the hooks)"
+                )
+            elif agent == "hermes":
+                print(
+                    "hermes: install the plugin with `hermes plugins install "
+                    "MarsGotta/jezero/plugins/hermes --enable` (it brings its own tools)"
+                )
+    finally:
+        use_home(original)
+    return code
 
 
 def _backfill_hermes(since: float, hermes_home: str | None) -> int:
@@ -993,12 +1238,24 @@ def _backfill_hermes(since: float, hermes_home: str | None) -> int:
     return queued
 
 
-def backfill(agents: list[str], days: float, hermes_home: str | None = None) -> int:
-    """Queue sessions already on disk (Claude Code, Codex, Hermes and Antigravity stores)."""
-    if not uploads_enabled(load_config()):
-        print("read-only computer (init --no-upload): nothing to upload")
-        return 0
-    since = time.time() - days * 86400
+def _backfill_agent(agent: str, since: float, hermes_home: str | None) -> int:
+    if agent == "hermes":
+        return _backfill_hermes(since, hermes_home)
+    queued = 0
+    if agent == "antigravity":
+        gemini = Path.home() / ".gemini"
+        for app in ("antigravity-cli", "antigravity", "antigravity-ide"):
+            pattern = "*/.system_generated/logs/transcript.jsonl"
+            for path in sorted((gemini / app / "brain").glob(pattern)):
+                conversation = path.parts[-4]
+                try:
+                    if path.stat().st_mtime >= since and enqueue(
+                        agent, conversation, str(path), None
+                    ):
+                        queued += 1
+                except OSError:
+                    continue
+        return queued
     roots = {
         "claude-code": (
             Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser() / "projects",
@@ -1009,38 +1266,44 @@ def backfill(agents: list[str], days: float, hermes_home: str | None = None) -> 
             "*/*/*/rollout-*.jsonl*",
         ),
     }
-    queued = 0
-    for agent in agents:
-        if agent == "hermes":
-            queued += _backfill_hermes(since, hermes_home)
+    if agent not in roots:
+        print(f"{agent}: backfill not supported (sessions arrive through the plugin)")
+        return 0
+    root, pattern = roots[agent]
+    for path in sorted(root.glob(pattern)):
+        try:
+            if path.stat().st_mtime >= since and enqueue(agent, path.stem, str(path), None):
+                queued += 1
+        except OSError:
             continue
-        if agent == "antigravity":
-            gemini = Path.home() / ".gemini"
-            for app in ("antigravity-cli", "antigravity", "antigravity-ide"):
-                pattern = "*/.system_generated/logs/transcript.jsonl"
-                for path in sorted((gemini / app / "brain").glob(pattern)):
-                    conversation = path.parts[-4]
-                    try:
-                        if path.stat().st_mtime >= since and enqueue(
-                            agent, conversation, str(path), None
-                        ):
-                            queued += 1
-                    except OSError:
-                        continue
-            continue
-        if agent not in roots:
-            print(f"{agent}: backfill not supported (sessions arrive through the plugin)")
-            continue
-        root, pattern = roots[agent]
-        for path in sorted(root.glob(pattern)):
-            try:
-                if path.stat().st_mtime >= since and enqueue(agent, path.stem, str(path), None):
-                    queued += 1
-            except OSError:
+    return queued
+
+
+def backfill(agents: list[str], days: float, hermes_home: str | None = None) -> int:
+    """Queue sessions already on disk (Claude Code, Codex, Hermes and Antigravity stores),
+    each in the queue of that agent's own key (see `agent_home`)."""
+    since = time.time() - days * 86400
+    original = HOME
+    queued: dict[Path, int] = {}
+    try:
+        for agent in agents:
+            use_agent_home(agent)
+            cfg = load_config()
+            if cfg is None:
+                print(f"{agent}: not set up ({HOME}): run `init` first")
                 continue
-    print(f"queued {queued} sessions; uploading in the background")
-    if queued:
-        spawn_flush()
+            if not uploads_enabled(cfg):
+                print(f"{agent}: read-only computer (init --no-upload): nothing to upload")
+                continue
+            queued[HOME] = queued.get(HOME, 0) + _backfill_agent(agent, since, hermes_home)
+        if queued:
+            print(f"queued {sum(queued.values())} sessions; uploading in the background")
+        for home, count in queued.items():
+            if count:
+                use_home(home)
+                spawn_flush()
+    finally:
+        use_home(original)
     return 0
 
 
@@ -1062,7 +1325,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="only read Jezero; never upload this computer's sessions",
     )
-    sub.add_parser("status", help="check the key with the server and show the queue")
+    p.add_argument(
+        "--mcp-path",
+        help="URL path of the server's MCP endpoint, when its admin changed it (default /mcp)",
+    )
+    p = sub.add_parser("status", help="check the key with the server and show the queue")
+    p.add_argument("--agent", choices=AGENTS, help="the key this agent uses")
     p = sub.add_parser("setup", help="register the Jezero MCP server in the agents")
     p.add_argument("--agent", action="append", choices=SETUP_AGENTS)
     p.add_argument("--opencode-plugin", help="path to jezero.ts to install for OpenCode")
@@ -1071,7 +1339,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("hook", help="run a hook (reads the agent's JSON on stdin)")
     p.add_argument("event", choices=["session-start", "user-prompt", "stop", "session-end"])
     p.add_argument("--agent", required=True, choices=AGENTS)
-    sub.add_parser("flush", help="upload queued sessions now")
+    p = sub.add_parser("flush", help="upload queued sessions now")
+    p.add_argument("--agent", choices=AGENTS, help="the queue of the key this agent uses")
     p = sub.add_parser("backfill", help="queue sessions already on this computer")
     p.add_argument("--agent", action="append", choices=AGENTS)
     p.add_argument("--days", type=float, default=90)
@@ -1082,7 +1351,9 @@ def main(argv: list[str] | None = None) -> int:
     use_agent_home(agent if isinstance(agent, str) else None)
 
     if args.command == "init":
-        return init(args.url, args.device, args.force, upload=not args.no_upload)
+        return init(
+            args.url, args.device, args.force, upload=not args.no_upload, mcp_path_=args.mcp_path
+        )
     if args.command == "status":
         return status()
     if args.command == "setup":
@@ -1108,9 +1379,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_config()
         if not cfg:
             return 1
-        counts = flush(cfg)
-        if sys.stdout.isatty():
-            print(json.dumps(counts))
+        print(json.dumps(flush(cfg)))  # a detached flush writes to /dev/null
         return 0
     if args.command == "backfill":
         return backfill(args.agent or ["claude-code", "codex"], args.days, args.hermes_home)

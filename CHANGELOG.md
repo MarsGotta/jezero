@@ -123,3 +123,24 @@
   (`skip_project_dirs`).
 - The MCP server unit stops within 10 s: clients keep streams open and the default 90 s
   wait made restarts slow.
+- Client 0.5.0:
+  - The Claude Code plugin brings its own MCP server (`.mcp.json`, the stdio bridge), and
+    `setup --agent claude-code` / `--agent codex` register the stdio bridge instead of
+    writing the bearer key in clear into the agent's config. With the Claude Code plugin
+    installed, `setup` registers nothing and removes an old user-scope `jezero` HTTP entry;
+    an old `[mcp_servers.jezero]` HTTP block in Codex' `config.toml` is replaced, the rest
+    of the file left byte for byte.
+  - `client.json` takes an optional `mcp_path` (default `/mcp`, set with
+    `init --mcp-path`) for servers with a custom `[server].path`; the core and the
+    OpenCode plugin use it.
+  - Uploads refused with HTTP 401/403 stay queued (logged once) until the key may upload;
+    files rejected with 400/413/415 are recorded as rejected, not as uploaded, and
+    `status` reports them with the queue size.
+  - A key kept in an agent's own folder (Antigravity's `~/.gemini/config/jezero`,
+    `$CLAUDE_CONFIG_DIR/jezero`, `$CODEX_HOME/jezero`) is used by the background upload,
+    `backfill --agent` and `setup --agent`, and by the `mcp` bridge for every agent.
+  - Without a key the session-start hooks print nothing; the Hermes plugin gives the
+    protocol once per session. `state.json` no longer grows without limit. `flush`
+    always prints its counts; `status` and `flush` take `--agent`.
+  - The app labels newer items found only by date: "NEWER IN THIS PROJECT (by date, not
+    by subject)".

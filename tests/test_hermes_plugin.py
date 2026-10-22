@@ -113,10 +113,12 @@ def test_connector_reads_exports_like_the_database(tmp_path: Path, monkeypatch) 
     later = NOW + 3 * 3600
 
     from_export = HermesConnector(
-        "agent-hermes-laptop", {"export_dir": str(exports)}, max_segment_chars=10_000
+        "agent-hermes-laptop",
+        {"export_dir": str(exports), "min_chars": 0},
+        max_segment_chars=10_000,
     ).collect(ConnectorState("x"), now=later)
     from_db = HermesConnector(
-        "agent-hermes", {"state_db": str(db)}, max_segment_chars=10_000
+        "agent-hermes", {"state_db": str(db), "min_chars": 0}, max_segment_chars=10_000
     ).collect(ConnectorState("y"), now=later)
 
     assert [d.text for d in from_export.docs] == [d.text for d in from_db.docs]
@@ -244,3 +246,16 @@ def test_status_of_a_read_only_computer(server, tmp_path, monkeypatch, capsys) -
     cfg_file.write_text(json.dumps(cfg))
     assert core.status() == 0
     assert "read-only" in capsys.readouterr().out
+
+
+def test_plugin_gives_the_protocol_once(tmp_path, monkeypatch) -> None:
+    plugin = load_plugin(tmp_path, monkeypatch, tmp_path / "jz")
+    assert plugin._pre_llm_call(session_id="p1", user_message="hi", is_first_turn=True) is None
+    configure(plugin._core(), "http://127.0.0.1:9")  # a key, but the server is down
+    first = plugin._pre_llm_call(session_id="p1", user_message="hi", is_first_turn=True)
+    assert "Jezero: shared memory of past work" in first["context"]
+    assert "`jezero_search`" in first["context"] and "`jezero_later`" in first["context"]
+    again = plugin._pre_llm_call(session_id="p1", user_message="hi", is_first_turn=True)
+    assert again is None  # once per session
+    other = plugin._pre_llm_call(session_id="p2", user_message="hi", is_first_turn=True)
+    assert "Jezero: shared memory of past work" in other["context"]

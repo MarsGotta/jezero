@@ -113,8 +113,8 @@ def test_hooks_context_and_upload(server, tmp_path: Path, monkeypatch: pytest.Mo
     url, inbox = server
     core = load_core(tmp_path / "home", monkeypatch)
 
-    # Not configured yet: the protocol still goes in, nothing else happens.
-    assert core.hook("session-start", "claude-code", {"cwd": "/w/projects/demo"}) == core.PROTOCOL
+    # Not configured yet: nothing at all (the protocol would name tools that are not there).
+    assert core.hook("session-start", "claude-code", {"cwd": "/w/projects/demo"}) == ""
     configure(core, url)
 
     start = core.hook("session-start", "claude-code", {"cwd": "/w/projects/demo"})

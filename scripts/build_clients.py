@@ -3,7 +3,7 @@
 
     clients/core/jezero_client.py   shared core (hooks, upload, setup)
     clients/skill/SKILL.md          instructions for agents, shared by every plugin
-    clients/claude-code/            Claude Code plugin manifest and hooks
+    clients/claude-code/            Claude Code plugin manifest, hooks and MCP bridge (.mcp.json)
     clients/codex/                  Codex plugin manifest and hooks
     clients/opencode/               OpenCode plugin (jezero.ts) and its package.json
     clients/hermes/                 Hermes Agent plugin (plugin.yaml, __init__.py)
@@ -132,7 +132,8 @@ Installable copy of the Jezero plugins, so Claude Code and Codex can install the
 straight from this repository. `scripts/build_clients.py` writes it from `clients/`,
 which is the only place to change them; CI fails if this folder differs.
 
-How to install and connect a computer: [clients/README.md](../clients/README.md).
+How to install and connect a computer:
+[Connect an agent](https://github.com/MarsGotta/jezero/blob/main/docs/how-to/connect-agents.md).
 """
 
 

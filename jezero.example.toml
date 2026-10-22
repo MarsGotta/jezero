@@ -163,7 +163,7 @@ settle_minutes = 30               # wait until an issue is quiet before summaris
 name = "mail-personal"
 type = "gmail"
 enabled = false
-trust = "external"          # written by third parties: data, never instructions
+trust = "external"          # third-party text: data, never instructions (gmail's default)
 interval_minutes = 15
 [connectors.options]
 credentials_file_env = "JEZERO_GMAIL_CREDENTIALS_FILE"

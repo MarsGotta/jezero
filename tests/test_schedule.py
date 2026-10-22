@@ -72,9 +72,14 @@ def test_run_isolates_failures_and_respects_due(tmp_path, monkeypatch, capsys) -
     lines = [json.loads(x) for x in capsys.readouterr().out.splitlines()]
     assert [x["connector"] for x in lines] == ["fresh", "old", "new"]
     assert "not found" in store.get_state("old").last_error
-    # Just ran: nothing is due.
+    # Just ran: nothing is due, and one line says so and when each one runs next.
     assert cli.main(["run", "--due"]) == 0
-    assert capsys.readouterr().out == ""
+    (line,) = capsys.readouterr().out.splitlines()
+    summary = json.loads(line)["due"]
+    assert summary["ran"] == []
+    assert sorted(summary["not_due_until"]) == ["fresh", "new", "old"]
+    next_run = datetime.fromisoformat(summary["not_due_until"]["old"])
+    assert timedelta(minutes=14) < next_run - datetime.now(UTC) <= timedelta(minutes=15)
 
 
 def test_heartbeat_reports_overall_status(tmp_path, monkeypatch) -> None:

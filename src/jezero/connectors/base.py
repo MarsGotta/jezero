@@ -6,6 +6,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from ..projects import ProjectRules
@@ -28,6 +29,33 @@ class RawDoc:
     activity_key: str | None = None
     """Opaque cursor value; the pipeline stores the last one it fully processed."""
     meta: dict[str, Any] = field(default_factory=dict)
+    """Short facts passed to the summarizer as context (`key=value`)."""
+    session: str | None = None
+    """Set by `whole_session` when the batch holds every segment of this session: ids are
+    `<session>#<first block>`, and `session_segments` lists all of them."""
+    session_segments: tuple[str, ...] = ()
+    """With `session`: the complete set of segment ids. Stored items of the same source
+    with the `<session>#` prefix and an id not listed are stale and may be pruned."""
+
+
+def whole_session(session: str, docs: list[RawDoc]) -> list[RawDoc]:
+    """Mark `docs` as every segment `session` has now (see `RawDoc.session`)."""
+    ids = tuple(d.external_id for d in docs)
+    for doc in docs:
+        doc.session = session
+        doc.session_segments = ids
+    return docs
+
+
+def require_dir(option: str, path: Path) -> None:
+    """A configured folder that is missing fails the run with a message naming it."""
+    if not path.is_dir():
+        raise FileNotFoundError(f"{option} folder not found: {path}")
+
+
+def require_file(option: str, path: Path) -> None:
+    if not path.is_file():
+        raise FileNotFoundError(f"{option} file not found: {path}")
 
 
 @dataclass(slots=True)

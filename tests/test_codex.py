@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from jezero.connectors.codex import CodexConnector
 from jezero.store import ConnectorState
 
@@ -171,10 +173,17 @@ def test_sessions_dir_glob_follows_every_agent_home(tmp_path: Path) -> None:
     conn = CodexConnector("c", {"sessions_dir": pattern}, max_segment_chars=60_000)
     batch = conn.collect(ConnectorState(name="c"), now=NOW)
     assert sorted(d.title_hint for d in batch.docs) == ["first title", "second title"]
+    # A glob that matches no agent yet is fine; the folder it starts from must exist.
+    (tmp_path / "idle").mkdir()
     empty = CodexConnector(
-        "c", {"sessions_dir": str(tmp_path / "none" / "*" / "sessions")}, max_segment_chars=60_000
+        "c", {"sessions_dir": str(tmp_path / "idle" / "*" / "sessions")}, max_segment_chars=60_000
     )
     assert empty.collect(ConnectorState(name="c"), now=NOW).docs == []
+    missing = CodexConnector(
+        "c", {"sessions_dir": str(tmp_path / "none" / "*" / "sessions")}, max_segment_chars=60_000
+    )
+    with pytest.raises(FileNotFoundError, match="sessions_dir folder not found: .*none"):
+        missing.collect(ConnectorState(name="c"), now=NOW)
 
 
 def test_user_prompt_markers_drop_repeated_agent_instructions(tmp_path: Path) -> None:

@@ -22,8 +22,12 @@ import io
 import os
 import re
 import tempfile
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+import zstandard
 
 from .projects import SIDECAR_SUFFIX
 
@@ -68,23 +72,45 @@ def target_path(inbox_dir: Path, device: str, agent: str, relpath: str) -> Path:
 
 
 def read_body(raw: bytes, *, encoding: str | None, max_bytes: int) -> bytes:
-    """Decode the request body (identity or gzip) within the size limit."""
-    if encoding in (None, "", "identity"):
+    """Decode the request body (identity, gzip or zstd) within the size limit."""
+    encoding = (encoding or "").strip().lower()
+    if encoding in ("", "identity"):
         if len(raw) > max_bytes:
             raise InboxError("file too large", status=413)
         return raw
-    if encoding != "gzip":
-        raise InboxError(f"unsupported Content-Encoding {encoding!r}", status=415)
+    if encoding == "gzip":
+        stream: Any = gzip.GzipFile(fileobj=io.BytesIO(raw))
+        errors: tuple[type[BaseException], ...] = (OSError, EOFError)
+    elif encoding == "zstd":
+        stream = zstandard.ZstdDecompressor().stream_reader(
+            io.BytesIO(raw), read_across_frames=True
+        )
+        errors = (zstandard.ZstdError, OSError, EOFError)
+    else:
+        raise InboxError(
+            f"unsupported Content-Encoding {encoding!r}; use gzip, zstd or none", status=415
+        )
     out = io.BytesIO()
     try:
-        with gzip.GzipFile(fileobj=io.BytesIO(raw)) as stream:
+        with stream:
             while chunk := stream.read(1 << 20):
                 out.write(chunk)
                 if out.tell() > max_bytes:
                     raise InboxError("file too large", status=413)
-    except (OSError, EOFError) as exc:
-        raise InboxError("body is not valid gzip") from exc
+    except errors as exc:
+        raise InboxError(f"body is not valid {encoding}") from exc
     return out.getvalue()
+
+
+async def read_stream(chunks: AsyncIterator[bytes], *, max_bytes: int) -> bytes:
+    """Collect a request body chunk by chunk, refusing it (413) as soon as it passes
+    `max_bytes`: a body sent without Content-Length never sits whole in memory."""
+    buffer = bytearray()
+    async for chunk in chunks:
+        if len(buffer) + len(chunk) > max_bytes:
+            raise InboxError("file too large", status=413)
+        buffer.extend(chunk)
+    return bytes(buffer)
 
 
 _PROJECT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")

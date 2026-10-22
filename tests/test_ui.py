@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from jezero.cli import main
 from jezero.ui.app import JezeroApp
 from jezero.ui.data import DemoBackend, ago, detect_agents, last_seen, source_agent
 from jezero.ui.look import PALETTES, sparkline, wordmark
+
+from .test_client import DEVICE_TOKEN, server  # noqa: F401  (server: fixture)
 
 
 def run(coro):  # noqa: ANN001, ANN201 - tiny helper
@@ -37,7 +40,7 @@ def test_app_walks_every_view_on_demo_data() -> None:
             assert app.current is not None and app.current["id"] == 2412
             await pilot.press("l")
             await pilot.pause(0.4)
-            assert app.current_newer == []
+            assert app.current_newer == [] and app.current_matched_by == "subject"
 
             await pilot.press("3")
             await pilot.pause(0.4)
@@ -86,7 +89,7 @@ def test_detect_agents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (folder / "jezero_client.py").write_text(f'VERSION = "{version}"\n')
 
     core_file(tmp_path / ".claude/plugins/cache/jezero/jezero/0.3.2/core", "0.3.2")
-    core_file(tmp_path / ".claude/plugins/cache/jezero/jezero/0.4.0/core", core.VERSION)
+    core_file(tmp_path / f".claude/plugins/cache/jezero/jezero/{core.VERSION}/core", core.VERSION)
     core_file(tmp_path / ".codex/plugins/cache/jezero/jezero/0.3.1/core", "0.3.1")
     (tmp_path / ".codex/config.toml").write_text("[mcp_servers.jezero]\nurl = 'x'\n")
     core_file(tmp_path / ".hermes/profiles/main/plugins/jezero/core", core.VERSION)
@@ -97,7 +100,8 @@ def test_detect_agents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     found = {s.agent: s for s in detect_agents(tmp_path)}
     assert found["claude-code"].version == core.VERSION and not found["claude-code"].outdated
     assert found["claude-code"].where and found["claude-code"].where.endswith(core.VERSION)
-    assert found["codex"].outdated and "MCP server registered" in found["codex"].notes
+    assert found["codex"].outdated
+    assert "old MCP entry with the key in clear: run setup" in found["codex"].notes
     assert found["opencode"].installed and found["opencode"].version == core.VERSION
     assert found["hermes"].installed and found["hermes"].notes == ["profiles: main"]
     assert not found["antigravity"].installed
@@ -139,6 +143,9 @@ def test_helpers() -> None:
     assert source_agent("tasks-board") is None
     sources = {"agent-codex-a": {"latest": "2026-10-01"}, "agent-codex-b": {"latest": "2026-10-03"}}
     assert last_seen(sources, "codex") == "2026-10-03"
+    sources["agent-codex"] = {"latest": "2026-10-05"}  # read on the server itself
+    assert last_seen(sources, "codex") == "2026-10-05"
+    assert source_agent("agent-codex") == "codex"
     p = PALETTES["jezero"]
     assert "JEZERO" not in wordmark(p).plain and "██" in wordmark(p).plain
     assert sparkline([0, 1, 8], p).plain == "·▁█"
@@ -154,3 +161,42 @@ def test_people_commands_on_demo(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["agents", "--demo"]) == 0
     assert "Codex" in capsys.readouterr().out
     assert main(["find", "nothing-like-this", "--demo"]) == 1
+
+
+def test_detect_claude_mcp_in_its_config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    for var in ("CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"):
+        monkeypatch.delenv(var, raising=False)
+    claude_dir = tmp_path / "claude-config"
+    (claude_dir / "plugins").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_dir))
+    entry = {"type": "stdio", "command": "python3", "args": ["x/jezero_client.py", "mcp"]}
+    (claude_dir / ".claude.json").write_text(json.dumps({"mcpServers": {"jezero": entry}}))
+    notes = {s.agent: s.notes for s in detect_agents(tmp_path)}["claude-code"]
+    assert notes == ["MCP server registered"]
+    (claude_dir / "plugins" / "installed_plugins.json").write_text(
+        json.dumps({"plugins": {"jezero@jezero": []}})
+    )
+    old = {"type": "http", "url": "https://x/mcp", "headers": {"Authorization": "y"}}
+    (claude_dir / ".claude.json").write_text(json.dumps({"mcpServers": {"jezero": old}}))
+    notes = {s.agent: s.notes for s in detect_agents(tmp_path)}["claude-code"]
+    assert notes == ["MCP via plugin", "old MCP entry with the key in clear: run setup"]
+
+
+def test_later_by_date_is_labelled(capsys: pytest.CaptureFixture[str]) -> None:
+    assert DemoBackend().later(2390)[1] == "subject"
+    newer, how = DemoBackend().later(2377)
+    assert how == "project_timeline" and newer
+    assert main(["show", "2377", "--newer", "--demo"]) == 0
+    out = capsys.readouterr().out
+    assert "NEWER IN THIS PROJECT (by date, not by subject)" in out
+    assert "NEWER ON THIS SUBJECT" not in out
+
+
+def test_remote_later_returns_how_it_matched(server, tmp_path, monkeypatch) -> None:  # noqa: F811
+    from jezero.ui.data import RemoteBackend
+
+    url, _ = server
+    backend = RemoteBackend({"url": url, "token": DEVICE_TOKEN, "device": "laptop"})
+    first = backend.search("uploader")[0]
+    newer, how = backend.later(int(first["id"]))
+    assert isinstance(newer, list) and how in ("subject", "project_timeline")

@@ -69,9 +69,9 @@ def cmd_show(args: argparse.Namespace) -> int:
     if item is None:
         console.print(Text(f"No memory #{args.id} that this key can read.", style=P.error))
         return 1
-    newer = backend.later(args.id) if args.newer else None
+    newer, how = backend.later(args.id) if args.newer else (None, "subject")
     hint = f"add --newer to check whether something newer changed #{args.id}"
-    view = item_view(item, P, newer, hint=hint)
+    view = item_view(item, P, newer, hint=hint, matched_by=how)
     console.print(Panel(view, border_style=P.faint, padding=(1, 2)))
     return 0
 

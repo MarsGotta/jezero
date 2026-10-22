@@ -20,7 +20,7 @@ To install them, read the guides:
 |---|---|
 | `core/jezero_client.py` | The client core: creates the device's key, runs the hooks, queues and uploads sessions, registers the MCP server. Python 3.9+, standard library only. |
 | `skill/SKILL.md` | The `jezero` skill, shared by every plugin. |
-| `claude-code/` | The Claude Code plugin manifest and hooks. |
+| `claude-code/` | The Claude Code plugin manifest, hooks and MCP bridge configuration (`.mcp.json`). |
 | `codex/` | The Codex plugin manifest and hooks. |
 | `opencode/` | The OpenCode plugin (`jezero.ts`) and its `package.json`. |
 | `hermes/` | The Hermes Agent plugin (`plugin.yaml`, `__init__.py`). |

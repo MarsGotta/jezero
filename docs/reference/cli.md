@@ -9,7 +9,7 @@ Every command and flag of the two command-line tools, generated from their code.
 
 ## Contents
 
-- `jezero`: [`ui`](#jezero-ui), [`find`](#jezero-find), [`show`](#jezero-show), [`agents`](#jezero-agents), [`connect`](#jezero-connect), [`init`](#jezero-init), [`check-config`](#jezero-check-config), [`stats`](#jezero-stats), [`search`](#jezero-search), [`import-jsonl`](#jezero-import-jsonl), [`new-token`](#jezero-new-token), [`run`](#jezero-run), [`redact-stored`](#jezero-redact-stored), [`device`](#jezero-device), [`resummarize`](#jezero-resummarize), [`retag`](#jezero-retag), [`health`](#jezero-health), [`serve`](#jezero-serve)
+- `jezero`: [`ui`](#jezero-ui), [`find`](#jezero-find), [`show`](#jezero-show), [`agents`](#jezero-agents), [`connect`](#jezero-connect), [`init`](#jezero-init), [`check-config`](#jezero-check-config), [`stats`](#jezero-stats), [`search`](#jezero-search), [`import-jsonl`](#jezero-import-jsonl), [`new-token`](#jezero-new-token), [`run`](#jezero-run), [`redact-stored`](#jezero-redact-stored), [`device`](#jezero-device), [`connector`](#jezero-connector), [`resummarize`](#jezero-resummarize), [`retag`](#jezero-retag), [`health`](#jezero-health), [`serve`](#jezero-serve)
 - `jezero_client.py`: [`init`](#jezero_clientpy-init), [`status`](#jezero_clientpy-status), [`setup`](#jezero_clientpy-setup), [`mcp`](#jezero_clientpy-mcp), [`hook`](#jezero_clientpy-hook), [`flush`](#jezero_clientpy-flush), [`backfill`](#jezero_clientpy-backfill), [`protocol`](#jezero_clientpy-protocol)
 
 ## `jezero`
@@ -191,7 +191,7 @@ jezero redact-stored [-h] [--dry-run]
 Devices that upload sessions (Jezero plugins).
 
 ```text
-jezero device [-h] {approve} ...
+jezero device [-h] {approve,list,revoke,rotate} ...
 ```
 
 #### `jezero device approve`
@@ -211,6 +211,77 @@ jezero device approve [-h] [--sources SOURCES [SOURCES ...]]
 | `--sources` `SOURCES` | optional | what it may read (default `['agent-*']`) |
 | `--source-prefix` `SOURCE_PREFIX` | optional | prefix of its sources; anything but 'agent' keeps them out of agent-* readers (default `agent`) |
 | `--read-only` | optional | it may read but not upload |
+
+#### `jezero device list`
+
+List clients: devices and token_env clients.
+
+```text
+jezero device list [-h] [--json]
+```
+
+| Argument | | Meaning |
+|---|---|---|
+| `--json` | optional | print JSON instead of a table |
+
+#### `jezero device revoke`
+
+Remove a client's key; its inbox connectors are disabled, stored items kept.
+
+```text
+jezero device revoke [-h] [--remove-connectors] name
+```
+
+| Argument | | Meaning |
+|---|---|---|
+| `name` | required | client to remove, as shown by `jezero device list` |
+| `--remove-connectors` | optional | remove its inbox connectors from the config instead of disabling them |
+
+#### `jezero device rotate`
+
+Replace a device key; the old key stops working.
+
+```text
+jezero device rotate [-h] name digest
+```
+
+| Argument | | Meaning |
+|---|---|---|
+| `name` | required | device whose key changes |
+| `digest` | required | sha256 of the new device key, as printed by the client |
+
+### `jezero connector`
+
+Inspect connectors or make one read its source again.
+
+```text
+jezero connector [-h] {list,reset} ...
+```
+
+#### `jezero connector list`
+
+Connectors with last run, last success, error and items.
+
+```text
+jezero connector list [-h] [--json]
+```
+
+| Argument | | Meaning |
+|---|---|---|
+| `--json` | optional | print JSON instead of a table |
+
+#### `jezero connector reset`
+
+Forget a connector's cursor so its next run reads the source from the start; stored items are kept and unchanged ones are skipped by content hash (no LLM calls).
+
+```text
+jezero connector reset [-h] [--yes] name
+```
+
+| Argument | | Meaning |
+|---|---|---|
+| `name` | required | connector to reset |
+| `--yes` | optional | do not ask for confirmation |
 
 ### `jezero resummarize`
 
@@ -265,6 +336,7 @@ Create this device's key.
 
 ```text
 jezero_client init [-h] --url URL --device DEVICE [--force] [--no-upload]
+                          [--mcp-path MCP_PATH]
 ```
 
 | Argument | | Meaning |
@@ -273,6 +345,7 @@ jezero_client init [-h] --url URL --device DEVICE [--force] [--no-upload]
 | `--device` `DEVICE` | required | a short name for this computer |
 | `--force` | optional | replace an existing key on this computer |
 | `--no-upload` | optional | only read Jezero; never upload this computer's sessions |
+| `--mcp-path` `MCP_PATH` | optional | URL path of the server's MCP endpoint, when its admin changed it (default /mcp) |
 
 ### `jezero_client.py status`
 
@@ -280,7 +353,12 @@ Check the key with the server and show the queue.
 
 ```text
 jezero_client status [-h]
+                            [--agent {claude-code,codex,opencode,hermes,antigravity}]
 ```
+
+| Argument | | Meaning |
+|---|---|---|
+| `--agent` `AGENT` | optional | the key this agent uses (one of `claude-code`, `codex`, `opencode`, `hermes`, `antigravity`) |
 
 ### `jezero_client.py setup`
 
@@ -330,7 +408,12 @@ Upload queued sessions now.
 
 ```text
 jezero_client flush [-h]
+                           [--agent {claude-code,codex,opencode,hermes,antigravity}]
 ```
+
+| Argument | | Meaning |
+|---|---|---|
+| `--agent` `AGENT` | optional | the queue of the key this agent uses (one of `claude-code`, `codex`, `opencode`, `hermes`, `antigravity`) |
 
 ### `jezero_client.py backfill`
 

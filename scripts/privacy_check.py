@@ -36,6 +36,12 @@ BUILTIN = [
     ),
     ("private LAN address", re.compile(r"\b(?:192\.168|10\.\d{1,3})\.\d{1,3}\.\d{1,3}\b")),
     (
+        "private LAN address",
+        # 172.16.0.0/12 only: a full dotted quad, second octet 16-31, not part of a longer
+        # number or version string (1.172.16.0.4).
+        re.compile(r"(?<![\d.])172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}(?![\d.]*\d)"),
+    ),
+    (
         "credential",
         re.compile(r"\b(?:sk-ant-|ghp_|github_pat_|xox[abposr]-|AKIA)[\w\-]{8,}"),
     ),

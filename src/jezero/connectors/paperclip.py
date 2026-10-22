@@ -11,6 +11,10 @@ answers. Every issue becomes one or more docs, in this order:
 
 The connector only sends GET requests. The API key is read from an env var
 (`api_key_env`); an agent key scoped to one company is enough.
+
+The project comes from `project_map` (Paperclip project name -> slug), renamed by the
+`[projects]` aliases and this connector's `project_aliases`, like the other connectors.
+Folder rules (`paths`, `roots`, git) do not apply: issues have no working directory.
 """
 
 from __future__ import annotations
@@ -22,8 +26,17 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from ..projects import DEFAULT_RULES, ProjectRules
 from ..store import ConnectorState
-from .base import Batch, BuildContext, ConnectorType, RawDoc, segment, truncate_middle
+from .base import (
+    Batch,
+    BuildContext,
+    ConnectorType,
+    RawDoc,
+    segment,
+    truncate_middle,
+    whole_session,
+)
 
 if TYPE_CHECKING:
     from ..config import ConnectorConfig
@@ -50,6 +63,7 @@ class PaperclipConnector:
         *,
         max_segment_chars: int,
         default_project: str | None = None,
+        project_rules: ProjectRules | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.name = name
@@ -63,6 +77,8 @@ class PaperclipConnector:
         self.skip_system_notices = bool(options.get("skip_system_notices", True))
         self.skip_statuses = set(options.get("skip_statuses", []))
         self.project_map = {str(k): str(v) for k, v in options.get("project_map", {}).items()}
+        self.project_aliases = dict(options.get("project_aliases", {}))
+        self.rules = (project_rules or DEFAULT_RULES).with_aliases(self.project_aliases)
         self.board_name = str(options.get("board_name", "board"))
         self.min_chars = int(options.get("min_chars", 200))
         self.max_segment_chars = max_segment_chars
@@ -165,7 +181,7 @@ class PaperclipConnector:
         ident = str(detail.get("identifier") or issue_id)
         title = str(detail.get("title") or "")
         project_name = names.get(f"project:{detail.get('projectId')}", "")
-        project = self.project_map.get(project_name) or self.default_project
+        project = self._project(project_name) or self.default_project
         assignee = names.get(str(detail.get("assigneeAgentId")), "") or (
             self.board_name if detail.get("assigneeUserId") else "unassigned"
         )
@@ -250,7 +266,14 @@ class PaperclipConnector:
                     meta={"status": detail.get("status"), "part": number, "parts": len(parts)},
                 )
             )
-        return docs
+        return whole_session(ident, docs)
+
+    def _project(self, project_name: str) -> str | None:
+        """`project_map` entry, renamed by the aliases (matched case-insensitively)."""
+        mapped = self.project_map.get(project_name)
+        if not mapped:
+            return None
+        return self.rules.aliases.get(mapped.lower(), mapped)
 
 
 def _compact(value: Any) -> str:
@@ -267,6 +290,7 @@ def _build(conn: ConnectorConfig, ctx: BuildContext) -> PaperclipConnector:
         conn.options,
         max_segment_chars=ctx.max_segment_chars,
         default_project=conn.project,
+        project_rules=ctx.project_rules,
     )
 
 

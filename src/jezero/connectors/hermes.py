@@ -9,7 +9,8 @@ every few minutes. The project comes from the session's working folder (`cwd`), 
 same rules as the other agent connectors.
 
 Options: `state_db` (a profile's state.db) or `export_dir` (a device's inbox folder of
-`<session>.json` exports), exactly one of them.
+`<session>.json` exports), exactly one of them. `min_chars` (default 400, like the other
+agent connectors) skips sessions whose dialogue is shorter, such as a lone greeting.
 """
 
 from __future__ import annotations
@@ -27,7 +28,16 @@ from typing import TYPE_CHECKING, Any
 
 from ..projects import DEFAULT_RULES, ProjectRules
 from ..store import ConnectorState
-from .base import Batch, BuildContext, ConnectorType, RawDoc, segment
+from .base import (
+    Batch,
+    BuildContext,
+    ConnectorType,
+    RawDoc,
+    require_dir,
+    require_file,
+    segment,
+    whole_session,
+)
 
 if TYPE_CHECKING:
     from ..config import ConnectorConfig
@@ -60,13 +70,13 @@ class HermesConnector:
         self.settle_seconds = float(options.get("settle_minutes", 30)) * 60
         self.include_tool_calls = bool(options.get("include_tool_calls", True))
         self.max_tool_args = int(options.get("max_tool_args_chars", 200))
+        self.min_chars = int(options.get("min_chars", 400))
         self.max_segment_chars = max_segment_chars
         self.default_project = default_project
 
     def _connect(self) -> sqlite3.Connection:
         assert self.state_db is not None
-        if not self.state_db.is_file():
-            raise FileNotFoundError(f"Hermes state database not found: {self.state_db}")
+        require_file("state_db", self.state_db)
         con = sqlite3.connect(f"file:{self.state_db}?mode=ro", uri=True, timeout=30)
         con.row_factory = sqlite3.Row
         return con
@@ -101,16 +111,20 @@ class HermesConnector:
                 key=lambda s: s["activity"],
                 reverse=sample is not None,
             )
-            if sample is not None:
-                ready = ready[:sample]
-            elif limit is not None:
-                ready = ready[:limit]
             docs: list[RawDoc] = []
+            processed: list[float] = []
+            taken = 0
             for session in ready:
-                docs.extend(self._session_docs(dict(session), self._rows(con, session["id"])))
-        next_cursor = None
-        if sample is None and ready:
-            next_cursor = repr(max(s["activity"] for s in ready))
+                if (sample is not None and taken >= sample) or (
+                    limit is not None and taken >= limit
+                ):
+                    break
+                session_docs = self._session_docs(dict(session), self._rows(con, session["id"]))
+                processed.append(float(session["activity"]))
+                docs.extend(session_docs)
+                # A sample counts sessions that produced something; trivial ones are skipped.
+                taken += 1 if (session_docs or sample is None) else 0
+        next_cursor = repr(max(processed)) if sample is None and processed else None
         return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
 
     def _collect_exports(
@@ -119,8 +133,7 @@ class HermesConnector:
         """Exports uploaded by a device: one JSON file per session, newest upload wins.
         The file's mtime (the upload time) is the cursor, like the other inbox readers."""
         assert self.export_dir is not None
-        if not self.export_dir.is_dir():
-            return Batch(docs=[], next_cursor=None, deferred=0)
+        require_dir("export_dir", self.export_dir)
         settled_before = now - self.settle_seconds
         cursor = float(state.cursor) if state.cursor and sample is None else 0.0
         candidates = []
@@ -135,27 +148,33 @@ class HermesConnector:
         ready = sorted(
             (c for c in candidates if c[0] <= settled_before), reverse=sample is not None
         )
-        if sample is not None:
-            ready = ready[:sample]
-        elif limit is not None:
-            ready = ready[:limit]
         docs: list[RawDoc] = []
-        for _, path in ready:
-            try:
-                export = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            session = export.get("session") if isinstance(export, dict) else None
-            messages = export.get("messages") if isinstance(export, dict) else None
-            if not isinstance(session, dict) or not isinstance(messages, list):
-                continue
-            if session.get("source") in self.skip_sources:
-                continue
-            session = {"id": path.stem, **session}
-            rows = [m for m in messages if isinstance(m, dict) and m.get("role")]
-            docs.extend(self._session_docs(session, rows, session_file=path))
-        next_cursor = repr(max(m for m, _ in ready)) if sample is None and ready else None
+        processed: list[float] = []
+        taken = 0
+        for mtime, path in ready:
+            if (sample is not None and taken >= sample) or (limit is not None and taken >= limit):
+                break
+            processed.append(mtime)
+            session_docs = self._export_docs(path)
+            docs.extend(session_docs)
+            taken += 1 if (session_docs or sample is None) else 0
+        next_cursor = repr(max(processed)) if sample is None and processed else None
         return Batch(docs=docs, next_cursor=next_cursor, deferred=deferred)
+
+    def _export_docs(self, path: Path) -> list[RawDoc]:
+        try:
+            export = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        session = export.get("session") if isinstance(export, dict) else None
+        messages = export.get("messages") if isinstance(export, dict) else None
+        if not isinstance(session, dict) or not isinstance(messages, list):
+            return []
+        if session.get("source") in self.skip_sources:
+            return []
+        session = {"id": path.stem, **session}
+        rows = [m for m in messages if isinstance(m, dict) and m.get("role")]
+        return self._session_docs(session, rows, session_file=path)
 
     def _rows(self, con: sqlite3.Connection, session_id: str) -> list[sqlite3.Row]:
         columns = {r[1] for r in con.execute("PRAGMA table_info(messages)")}
@@ -182,6 +201,8 @@ class HermesConnector:
             if text:
                 stamp = row["timestamp"] or session.get("started_at") or 0
                 blocks.append((row["id"], float(stamp), text))
+        if sum(len(b[2]) for b in blocks) < self.min_chars:
+            return []  # trivial sessions ("hi", a single command) are not worth a call
         parts = segment(blocks, self.max_segment_chars)
         docs = []
         for index, part in enumerate(parts, 1):
@@ -199,7 +220,7 @@ class HermesConnector:
                     meta={"channel": session.get("source"), "part": index, "parts": len(parts)},
                 )
             )
-        return docs
+        return whole_session(str(session["id"]), docs)
 
     def _render(self, row: Mapping[str, Any]) -> str:
         if row["role"] not in ("user", "assistant"):

@@ -1,7 +1,8 @@
 /**
  * Jezero plugin for OpenCode: a thin adapter over the shared Python core.
  *
- * - Registers the Jezero MCP server (from ~/.jezero/client.json and its key file).
+ * - Registers the Jezero MCP server (from ~/.jezero/client.json, its `mcp_path` and its
+ *   key file).
  * - Adds the Jezero protocol, recent work of the project and, after the first prompt,
  *   related past work to the system prompt.
  * - When a session goes idle, exports it through the SDK and lets the core upload it
@@ -44,12 +45,19 @@ function core(args: string[], input: object): string {
   return run.status === 0 ? (run.stdout ?? "") : ""
 }
 
-function clientConfig(): { url: string; token: string; upload: boolean } | null {
+// `mcp_path` in client.json, like the core's mcp_path(): the server's [server].path.
+function mcpPath(value: unknown): string {
+  const path = String(value ?? "").trim().replace(/^\/+|\/+$/g, "")
+  return path ? `/${path}` : "/mcp"
+}
+
+function clientConfig(): { url: string; mcpUrl: string; token: string; upload: boolean } | null {
   try {
     const cfg = JSON.parse(readFileSync(join(HOME, "client.json"), "utf8"))
     const token = readFileSync(join(HOME, "token"), "utf8").trim()
     if (!cfg.url || !token) return null
-    return { url: String(cfg.url).replace(/\/+$/, ""), token, upload: cfg.upload !== false }
+    const url = String(cfg.url).replace(/\/+$/, "")
+    return { url, mcpUrl: url + mcpPath(cfg.mcp_path), token, upload: cfg.upload !== false }
   } catch {
     return null
   }
@@ -89,7 +97,7 @@ export const Jezero: Plugin = async ({ client, directory }) => {
       if (cfg.mcp.jezero) return
       cfg.mcp.jezero = {
         type: "remote",
-        url: `${jezero.url}/mcp`,
+        url: jezero.mcpUrl,
         enabled: true,
         headers: { Authorization: `Bearer ${jezero.token}` },
       }

@@ -24,7 +24,16 @@ from typing import TYPE_CHECKING, Any
 
 from ..projects import DEFAULT_RULES, ProjectRules
 from ..store import ConnectorState
-from .base import Batch, BuildContext, ConnectorType, RawDoc, segment, truncate_middle
+from .base import (
+    Batch,
+    BuildContext,
+    ConnectorType,
+    RawDoc,
+    require_dir,
+    segment,
+    truncate_middle,
+    whole_session,
+)
 
 if TYPE_CHECKING:
     from ..config import ConnectorConfig
@@ -75,8 +84,7 @@ class ClaudeCodeConnector:
     # -- discovery ---------------------------------------------------------------------
 
     def _files(self) -> list[Path]:
-        if not self.root.is_dir():
-            raise FileNotFoundError(f"Claude Code projects directory not found: {self.root}")
+        require_dir("projects_dir", self.root)
         files = sorted(self.root.rglob("*.jsonl"))
         if not self.include_subagents:
             files = [f for f in files if "subagents" not in f.relative_to(self.root).parts]
@@ -194,7 +202,7 @@ class ClaudeCodeConnector:
                     },
                 )
             )
-        return docs
+        return whole_session(session_id, docs)
 
     def _render(self, record: dict[str, Any], stamp: float, tool_names: dict[str, str]) -> str:
         role = record["type"]

@@ -30,7 +30,9 @@ from .base import (
     ConnectorType,
     PromptCleaner,
     RawDoc,
+    require_dir,
     segment,
+    whole_session,
 )
 
 if TYPE_CHECKING:
@@ -96,8 +98,11 @@ class CodexConnector:
         now: float | None = None,
     ) -> Batch:
         roots = self._roots()
-        if not roots and not self.is_glob:
-            raise FileNotFoundError(f"Codex sessions directory not found: {self.root}")
+        if self.is_glob:
+            # A glob may match no agent yet, but the folder it starts from must exist.
+            require_dir("sessions_dir", _glob_base(self.root_pattern))
+        else:
+            require_dir("sessions_dir", self.root)
         now = time.time() if now is None else now
         settled_before = now - self.settle_seconds
         cursor = float(state.cursor) if state.cursor and sample is None else 0.0
@@ -211,7 +216,7 @@ class CodexConnector:
                     },
                 )
             )
-        return docs, True
+        return whole_session(session_id, docs), True
 
     def _wanted(self, meta: dict[str, Any]) -> bool:
         source = meta.get("source")
@@ -294,6 +299,17 @@ def _timestamp(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value) / (1000 if value > 1e12 else 1)
     return None
+
+
+def _glob_base(pattern: str) -> Path:
+    """The folder a glob starts from: its parts before the first wildcard."""
+    parts = Path(pattern).parts
+    fixed = []
+    for part in parts:
+        if glob.has_magic(part):
+            break
+        fixed.append(part)
+    return Path(*fixed) if fixed else Path()
 
 
 def _unescape(value: str) -> str:

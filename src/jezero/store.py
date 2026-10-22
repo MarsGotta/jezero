@@ -369,6 +369,21 @@ class Store:
                 )
         return changed_items, total
 
+    def prune_segments(self, source: str, session: str, keep: Sequence[str]) -> int:
+        """Delete the items of `source` whose external_id is a segment of `session`
+        (`<session>#...`) and not in `keep`. Returns how many were removed."""
+        prefix, kept = session + "#", set(keep)
+        with self._write() as con:
+            rows = con.execute(
+                "SELECT id, external_id FROM items WHERE source = ? "
+                "AND substr(external_id, 1, ?) = ?",
+                (source, len(prefix), prefix),
+            ).fetchall()
+            stale = [r["id"] for r in rows if r["external_id"] not in kept]
+            con.executemany("DELETE FROM items_fts WHERE rowid = ?", [(i,) for i in stale])
+            con.executemany("DELETE FROM items WHERE id = ?", [(i,) for i in stale])
+        return len(stale)
+
     def delete_source(self, source: str) -> int:
         with self._write() as con:
             ids = [r[0] for r in con.execute("SELECT id FROM items WHERE source = ?", (source,))]
@@ -402,6 +417,17 @@ class Store:
         with self._read() as con:
             rows = con.execute("SELECT * FROM connector_state ORDER BY name").fetchall()
         return [ConnectorState(**dict(r)) for r in rows]
+
+    def reset_cursor(self, name: str) -> bool:
+        """Forget where a connector stopped, so its next run reads the source from the
+        start. Items stay; the pipeline skips those whose content hash is unchanged.
+        Returns whether there was a cursor to forget."""
+        with self._write() as con:
+            cur = con.execute(
+                "UPDATE connector_state SET cursor = NULL WHERE name = ? AND cursor IS NOT NULL",
+                (name,),
+            )
+            return cur.rowcount > 0
 
     # -- small key/value metadata -----------------------------------------------------
 
@@ -550,10 +576,11 @@ class Store:
         from datetime import timedelta
 
         sources = self.resolve_sources(allowed_sources)
-        if sources is not None and not sources:
-            return {"items": 0, "days": [], "sources": {}, "projects": {}}
         today = (now or datetime.now(UTC)).astimezone(UTC).date()
         day_list = [(today - timedelta(days=days - 1 - i)).isoformat() for i in range(days)]
+        if sources is not None and not sources:
+            # Nothing readable: still the same shape, so a dashboard can draw empty days.
+            return {"items": 0, "days": day_list, "sources": {}, "projects": {}}
         where, params = "", []
         if sources is not None:
             where = f"WHERE source IN ({','.join('?' * len(sources))})"
