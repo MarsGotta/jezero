@@ -13,7 +13,17 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SKIP = {".git", ".venv", "node_modules", "plugins", "dist", "build", ".pytest_cache", "data", ".ruff_cache"}
+SKIP = {
+    ".git",
+    ".venv",
+    "node_modules",
+    "plugins",
+    "dist",
+    "build",
+    ".pytest_cache",
+    "data",
+    ".ruff_cache",
+}
 LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)|<img[^>]+src=\"([^\"]+)\"")
 IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
 HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
