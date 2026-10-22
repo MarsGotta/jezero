@@ -9,7 +9,7 @@ Every command and flag of the two command-line tools, generated from their code.
 
 ## Contents
 
-- `jezero`: [`ui`](#jezero-ui), [`find`](#jezero-find), [`show`](#jezero-show), [`agents`](#jezero-agents), [`connect`](#jezero-connect), [`init`](#jezero-init), [`check-config`](#jezero-check-config), [`stats`](#jezero-stats), [`search`](#jezero-search), [`import-jsonl`](#jezero-import-jsonl), [`new-token`](#jezero-new-token), [`run`](#jezero-run), [`redact-stored`](#jezero-redact-stored), [`device`](#jezero-device), [`connector`](#jezero-connector), [`resummarize`](#jezero-resummarize), [`retag`](#jezero-retag), [`health`](#jezero-health), [`serve`](#jezero-serve)
+- `jezero`: [`ui`](#jezero-ui), [`find`](#jezero-find), [`show`](#jezero-show), [`agents`](#jezero-agents), [`connect`](#jezero-connect), [`init`](#jezero-init), [`check-config`](#jezero-check-config), [`stats`](#jezero-stats), [`search`](#jezero-search), [`eval`](#jezero-eval), [`import-jsonl`](#jezero-import-jsonl), [`new-token`](#jezero-new-token), [`run`](#jezero-run), [`redact-stored`](#jezero-redact-stored), [`device`](#jezero-device), [`connector`](#jezero-connector), [`resummarize`](#jezero-resummarize), [`retag`](#jezero-retag), [`health`](#jezero-health), [`serve`](#jezero-serve)
 - `jezero_client.py`: [`init`](#jezero_clientpy-init), [`status`](#jezero_clientpy-status), [`setup`](#jezero_clientpy-setup), [`mcp`](#jezero_clientpy-mcp), [`hook`](#jezero_clientpy-hook), [`flush`](#jezero_clientpy-flush), [`backfill`](#jezero_clientpy-backfill), [`protocol`](#jezero_clientpy-protocol)
 
 ## `jezero`
@@ -131,6 +131,27 @@ jezero search [-h] [--source SOURCE] [--project PROJECT] [--limit LIMIT] query
 | `--source` `SOURCE` | optional | only this source |
 | `--project` `PROJECT` | optional | only this project |
 | `--limit` `LIMIT` | optional | maximum results (default: search.default_limit) |
+
+### `jezero eval`
+
+Measure search quality with a file of questions and answers.
+
+```text
+jezero eval [-h] [--k K] [--client CLIENT | --sources GLOB [GLOB ...]]
+                   [--save PATH] [--compare PATH] [--fail-under SHARE] [--json]
+                   file
+```
+
+| Argument | | Meaning |
+|---|---|---|
+| `file` | required | question file (TOML, see examples/eval.example.toml) |
+| `--k` `K` | optional | a case passes if an expected item is in the top K (default 5) |
+| `--client` `CLIENT` | optional | read with the sources of this [[clients]] entry |
+| `--sources` `GLOB` | optional | read only these sources |
+| `--save` `PATH` | optional | write the result as JSON, to compare later |
+| `--compare` `PATH` | optional | a result saved earlier: show what changed |
+| `--fail-under` `SHARE` | optional | exit 1 if hit@K is below this (0 to 1) |
+| `--json` | optional | print the result as JSON |
 
 ### `jezero import-jsonl`
 

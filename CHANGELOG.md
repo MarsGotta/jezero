@@ -123,6 +123,11 @@
   (`skip_project_dirs`).
 - The MCP server unit stops within 10 s: clients keep streams open and the default 90 s
   wait made restarts slow.
+- `jezero eval`: a TOML file of questions and the items that answer them, scored with the
+  same search the MCP server runs (top-k hits, hit@1, MRR), with `later` cases for
+  decisions that changed, a client's scope (`--client`, `--sources`), `--save` and
+  `--compare` to see which cases got better or worse, and `--fail-under` for scripts.
+  Guide: docs/how-to/measure-search.md; example: examples/eval.example.toml.
 - The summarizer's project guess goes through `[projects].aliases` and the connector's
   `project_aliases`, like the source's own hint; `jezero retag` applies new aliases to
   stored guesses too.

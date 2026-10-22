@@ -1,0 +1,44 @@
+# Questions for `jezero eval`, written for the demo items in items.example.jsonl.
+#
+#   jezero import-jsonl examples/items.example.jsonl --source demo
+#   jezero eval examples/eval.example.toml
+#
+# Write your own file next to your config (it names your items, so keep it out of git)
+# with 30 or more questions as people really ask them, not copied from the titles.
+
+[defaults]
+k = 5               # a case passes when an expected item is in the top 5
+# sources = ["agent-*"]  # read like a client limited to these sources (default: all)
+# fail_under = 0.8       # exit 1 when fewer than 80 % of the cases pass
+
+[[case]]
+id = "rollback"
+question = "How would we undo the invoices migration if it goes wrong?"
+expect = [1]
+
+[[case]]
+id = "flaky-refund"
+question = "Why does the refund test fail now and then?"
+expect = [2]
+
+[[case]]
+id = "docs-hosting"
+question = "¿Dónde se publica la documentación y por qué no tiene servidor?"
+expect = [3]
+
+[[case]]
+# Only the words an agent would type: `query` replaces the question in the search.
+id = "frozen-time"
+question = "What did we change so the payments tests stop depending on the clock?"
+query = "payments test clock fixture"
+expect = [2]
+
+[[case]]
+# `later` cases start from an item with an old state and check that the `later` tool
+# brings back the newer item that changed it.
+id = "after-rollback-plan"
+kind = "later"
+item = 1
+query = "test"
+question = "What happened in billing-api after the rollback plan?"
+expect = [2]

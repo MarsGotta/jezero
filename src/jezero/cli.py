@@ -118,6 +118,56 @@ def cmd_search(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval(config: Config, args: argparse.Namespace) -> int:
+    """Run a question file against the library and print how many cases pass."""
+    from .evaluate import EvalFileError, compare, format_report, load_cases, run_cases, save
+
+    try:
+        cases, defaults = load_cases(Path(args.file))
+    except (OSError, EvalFileError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    sources = defaults.get("sources")
+    if args.client:
+        client = next((c for c in config.clients if c.name == args.client), None)
+        if client is None:
+            print(f"error: no client named {args.client!r} in [[clients]]", file=sys.stderr)
+            return 2
+        sources = list(client.sources)
+    elif args.sources:
+        sources = args.sources
+    k = args.k or int(defaults.get("k", 5))
+    report = run_cases(_store(config), config, cases, k=k, sources=sources)
+    previous = None
+    if args.compare:
+        try:
+            previous = json.loads(Path(args.compare).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"error: cannot read {args.compare}: {exc}", file=sys.stderr)
+            return 2
+    if args.json:
+        print(json.dumps(report.to_dict()))
+    else:
+        print(format_report(report, cases))
+        if previous is not None:
+            better, worse = compare(report, previous)
+            was = f"{previous.get('passed')}/{previous.get('cases')}"
+            print(
+                f"before: {was}; better: {', '.join(better) or '-'};"
+                f" worse: {', '.join(worse) or '-'}"
+            )
+    if args.save:
+        save(report, Path(args.save))
+    fail_under = args.fail_under if args.fail_under is not None else defaults.get("fail_under")
+    if fail_under is not None and report.hit_at_k < float(fail_under):
+        print(
+            f"below the target: hit@{k} {report.hit_at_k:.0%} < {float(fail_under):.0%}",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
 def cmd_import_jsonl(config: Config, args: argparse.Namespace) -> int:
     redactor = Redactor(config.redaction.extra_patterns, enabled=config.redaction.enabled)
     counts = import_jsonl(
@@ -694,6 +744,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--project", help="only this project")
     p.add_argument("--limit", type=int, help="maximum results (default: search.default_limit)")
     p.set_defaults(fn=cmd_search)
+
+    p = sub.add_parser("eval", help="measure search quality with a file of questions and answers")
+    p.add_argument("file", help="question file (TOML, see examples/eval.example.toml)")
+    p.add_argument(
+        "--k", type=int, help="a case passes if an expected item is in the top K (default 5)"
+    )
+    who = p.add_mutually_exclusive_group()
+    who.add_argument("--client", help="read with the sources of this [[clients]] entry")
+    who.add_argument("--sources", nargs="+", metavar="GLOB", help="read only these sources")
+    p.add_argument("--save", metavar="PATH", help="write the result as JSON, to compare later")
+    p.add_argument("--compare", metavar="PATH", help="a result saved earlier: show what changed")
+    p.add_argument(
+        "--fail-under", type=float, metavar="SHARE", help="exit 1 if hit@K is below this (0 to 1)"
+    )
+    p.add_argument("--json", action="store_true", help="print the result as JSON")
+    p.set_defaults(fn=cmd_eval)
 
     p = sub.add_parser("import-jsonl", help="import pre-summarised items from a JSONL file")
     p.add_argument("path", help="JSONL file, one item per line")

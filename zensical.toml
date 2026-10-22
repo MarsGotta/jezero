@@ -23,6 +23,7 @@ nav = [
       "how-to/deploy.md",
       "how-to/sources.md",
       "how-to/monitor.md",
+      "how-to/measure-search.md",
     ] },
     { "Agents and computers" = [
       "how-to/connect-agents.md",

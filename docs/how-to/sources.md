@@ -370,6 +370,7 @@ calls no model; to change the summaries themselves, `jezero resummarize`.
 ## Next steps
 
 - [Connectors](../reference/connectors.md): every option of every type.
+- [Measure search quality](measure-search.md): check that a new source does not push answers down.
 - [Keep an eye on Jezero](monitor.md): alerts when a source stops.
 - [Manage computers and keys](devices.md): sessions from other computers, and which
   sources each key may read.

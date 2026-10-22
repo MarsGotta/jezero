@@ -27,6 +27,7 @@ Guides for a goal you already have.
 - [Run Jezero as a service](how-to/deploy.md): systemd, HTTPS, backups and upgrades.
 - [Add and tune sources](how-to/sources.md): connectors, projects, redaction, summaries.
 - [Keep an eye on Jezero](how-to/monitor.md): health checks, alerts and logs.
+- [Measure search quality](how-to/measure-search.md): a question file and a score to compare.
 
 **Connecting agents and computers**
 

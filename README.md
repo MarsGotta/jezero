@@ -133,7 +133,7 @@ GitHub in [`docs/`](docs/README.md):
 | | |
 |---|---|
 | **Learn** | [Your first library](docs/getting-started/tutorial.md) · [Connect a second computer](docs/getting-started/connect-a-computer.md) |
-| **Do** | [Run as a service](docs/how-to/deploy.md) · [Sources](docs/how-to/sources.md) · [Monitor](docs/how-to/monitor.md) · [Agents](docs/how-to/connect-agents.md) · [Computers and keys](docs/how-to/devices.md) · [App](docs/how-to/app.md) · [Troubleshooting](docs/how-to/troubleshooting.md) |
+| **Do** | [Run as a service](docs/how-to/deploy.md) · [Sources](docs/how-to/sources.md) · [Monitor](docs/how-to/monitor.md) · [Search quality](docs/how-to/measure-search.md) · [Agents](docs/how-to/connect-agents.md) · [Computers and keys](docs/how-to/devices.md) · [App](docs/how-to/app.md) · [Troubleshooting](docs/how-to/troubleshooting.md) |
 | **Look up** | [Commands](docs/reference/cli.md) · [Configuration](docs/reference/configuration.md) · [Connectors](docs/reference/connectors.md) · [MCP tools](docs/reference/mcp-tools.md) · [HTTP API](docs/reference/http-api.md) · [Client](docs/reference/client.md) · [Data model](docs/reference/data-model.md) · [Glossary](docs/glossary.md) |
 | **Understand** | [Architecture](docs/explanation/architecture.md) · [Search](docs/explanation/search.md) · [Summaries](docs/explanation/summaries.md) · [Security](docs/explanation/security.md) · [Design decisions](docs/explanation/design-decisions.md) |
 
