@@ -115,7 +115,7 @@ def test_known_projects_and_language_reach_the_prompt() -> None:
     summarizer.known_projects = ["shop", "billing"]
     run(summarizer)
     prompt = json.loads(seen[0].content)["messages"][0]["content"]
-    assert "Known projects (prefer these slugs): shop, billing" in prompt
+    assert "the order means nothing): shop, billing" in prompt
     assert "in Spanish, whatever the document's language" in prompt
 
 
@@ -230,3 +230,34 @@ def test_parse_caps_lists() -> None:
     assert len(result.title) == summarize_module.MAX_TITLE_CHARS == 200
     assert len(result.questions) == summarize_module.MAX_QUESTIONS == 6
     assert len(result.atoms) == summarize_module.MAX_ATOMS == 12
+
+
+def test_guess_project_asks_only_for_the_project() -> None:
+    def reply(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "model": "small-model",
+                "usage": {"input_tokens": 30, "output_tokens": 5},
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "record_project",
+                        "input": {"project": " Billing "},
+                    }
+                ],
+            },
+        )
+
+    summarizer, seen = make(reply)
+    summarizer.known_projects = ["shop", "billing"]
+    assert asyncio.run(summarizer.guess_project("Invoice export format")) == "billing"
+    body = json.loads(seen[0].content)
+    assert body["tool_choice"] == {"type": "tool", "name": "record_project"}
+    assert body["system"] == summarize_module.PROJECT_PROMPT
+    assert "the order means nothing): shop, billing" in body["messages"][0]["content"]
+
+
+def test_guess_project_null_on_openai() -> None:
+    summarizer, _ = make(lambda _: openai_reply({"project": None}), provider="openai_compatible")
+    assert asyncio.run(summarizer.guess_project("chat about the weather")) is None

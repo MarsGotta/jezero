@@ -234,8 +234,34 @@ then rename the result, as for the other connectors.
    jezero retag --connector agent-claude-code
    ```
 
-`retag` only changes items whose source gives a project; items where the model chose stay
-as they are. The git rule needs the session's folder to exist on the server. For
+Without more options, `retag` changes items whose source gives a project, and passes the
+model's choice for the rest through the aliases.
+
+4. Check the model's choices. When a source gives no project (a chat assistant with no
+   working folder), the model picks one, and it can pick a known project that has nothing
+   to do with the session. `--ask-model` finds the items whose tag never appears in their
+   own title, summary or atoms, and asks the model again, from the stored summary only
+   (one short call each, much cheaper than summarising again):
+
+   ```bash
+   jezero retag --connector agent-hermes --ask-model --dry-run
+   ```
+
+   A new project is used only when the item's own text names it: an answer the text never
+   mentions is no better supported than the old tag. Each change is printed as
+   `[ID] old -> new  title`, and the last line gives the calls, the tokens and how many
+   answers were left out. Read the list, then apply it with a log, so it can be undone by
+   hand:
+
+   ```bash
+   jezero retag --connector agent-hermes --ask-model --log data/retag.jsonl
+   ```
+
+   > [!NOTE]
+   > The dry run already calls the model, so it costs as much as the real run. A second
+   > run asks again and may answer differently for a borderline item.
+
+The git rule needs the session's folder to exist on the server. For
 sessions from other computers, set the same rules in the device's
 `~/.jezero/client.json`, under `"projects"`, so its plugin tags them before upload (see
 [Client](../reference/client.md)).

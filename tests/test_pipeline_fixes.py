@@ -349,3 +349,91 @@ project_aliases = {{ "northwind" = "atlas" }}
     (hit,) = store.search("Synthetic")
     assert hit.item.project == "atlas"
     assert aliased.connectors[0].options["project_aliases"] == {"northwind": "atlas"}
+
+
+def test_retag_ask_model_moves_unmentioned_guesses(tmp_path: Path, monkeypatch, capsys) -> None:
+    import jezero.summarize as summarize_module
+    from jezero.cli import main as cli_main
+
+    path = claude_session(tmp_path / "claude", "s1", 4)
+    path.write_text(path.read_text().replace('"cwd": "/w/projects/demo"', '"cwd": "/w/x"'))
+    os.utime(path, (OLD, OLD))
+    config = make_config(tmp_path)
+    store = Store(config.db_path)
+    store.init()
+    run(config, store, summarizer=GuessingSummarizer())  # stored as "Northwind", never named
+
+    class FakeModel:
+        def __init__(self, *a, **kw) -> None:
+            self.usage = Usage()
+
+        async def guess_project(self, text: str) -> str | None:
+            assert "Synthetic summary." in text  # asked from the summary, not the original
+            self.usage.calls += 1
+            return "synthetic" if "Synthetic" in text else "atlas"
+
+    monkeypatch.setattr(summarize_module, "Summarizer", FakeModel)
+    cfg_file = tmp_path / "jezero.toml"
+    cfg_file.write_text(
+        f'''[storage]
+path = "{config.db_path}"
+
+[[connectors]]
+name = "agent-claude"
+type = "claude_code"
+[connectors.options]
+projects_dir = "{tmp_path / "claude"}"
+'''
+    )
+    log = tmp_path / "moves.jsonl"
+    args = ["-c", str(cfg_file), "retag", "--connector", "agent-claude", "--ask-model"]
+    assert cli_main([*args, "--dry-run"]) == 0
+    (hit,) = store.search("Synthetic")
+    assert hit.item.project == "Northwind"  # dry run writes nothing
+    assert cli_main([*args, "--log", str(log)]) == 0
+    (hit,) = store.search("Synthetic")
+    assert hit.item.project == "synthetic"  # named in its own title, so it is used
+    assert json.loads(log.read_text()) == {"id": hit.item.id, "old": "Northwind", "new": "synthetic"}
+    assert "Northwind -> synthetic" in capsys.readouterr().err
+
+
+def test_retag_ask_model_leaves_out_answers_the_text_never_names(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    import jezero.summarize as summarize_module
+    from jezero.cli import main as cli_main
+
+    path = claude_session(tmp_path / "claude", "s1", 4)
+    path.write_text(path.read_text().replace('"cwd": "/w/projects/demo"', '"cwd": "/w/x"'))
+    os.utime(path, (OLD, OLD))
+    config = make_config(tmp_path)
+    store = Store(config.db_path)
+    store.init()
+    run(config, store, summarizer=GuessingSummarizer())
+
+    class DriftingModel:
+        def __init__(self, *a, **kw) -> None:
+            self.usage = Usage()
+
+        async def guess_project(self, text: str) -> str | None:
+            return "billing"  # a listed slug the session never mentions
+
+    monkeypatch.setattr(summarize_module, "Summarizer", DriftingModel)
+    cfg_file = tmp_path / "jezero.toml"
+    cfg_file.write_text(
+        f'''[storage]
+path = "{config.db_path}"
+
+[[connectors]]
+name = "agent-claude"
+type = "claude_code"
+[connectors.options]
+projects_dir = "{tmp_path / "claude"}"
+'''
+    )
+    assert (
+        cli_main(["-c", str(cfg_file), "retag", "--connector", "agent-claude", "--ask-model"]) == 0
+    )
+    (hit,) = store.search("Synthetic")
+    assert hit.item.project == "Northwind"
+    assert "1 answers not named" in capsys.readouterr().err

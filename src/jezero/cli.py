@@ -25,6 +25,7 @@ from .config import (
 )
 from .connectors import CONNECTOR_TYPES
 from .ingest import IngestError, import_jsonl
+from .models import Item
 from .redact import Redactor
 from .store import Store, StoreError, sqlite_version
 
@@ -299,6 +300,7 @@ def cmd_retag(config: Config, args: argparse.Namespace) -> int:
         batch = build_connector(config, conn).collect(ConnectorState(name=conn.name))
         rules = connector_rules(config, conn)
         changed = 0
+        hinted = {doc.external_id for doc in batch.docs if doc.project_hint}
         for doc in batch.docs:
             current = store.project_of(conn.name, doc.external_id)
             # The source's own hint wins; otherwise the stored tag (the summarizer's guess)
@@ -310,9 +312,82 @@ def cmd_retag(config: Config, args: argparse.Namespace) -> int:
                 changed += 1
             else:
                 changed += int(store.set_project(conn.name, doc.external_id, wanted))
+        asked = moved = 0
+        if getattr(args, "ask_model", False):
+            asked, moved = _retag_with_model(config, args, store, conn.name, hinted, rules)
     report = {"connector": conn.name, "docs": len(batch.docs), "retagged": changed}
+    if getattr(args, "ask_model", False):
+        report |= {"asked_model": asked, "moved_by_model": moved}
     print(json.dumps(report | {"dry_run": bool(args.dry_run)}))
     return 0
+
+
+def _mentions(project: str, item: Item) -> bool:
+    """Whether an item's own text names its project (`billing-api` also as "billing api")."""
+    import re
+
+    text = " ".join([item.title, item.summary, *item.questions, *(a.text for a in item.atoms)])
+    pattern = r"\b" + re.escape(project).replace(r"\-", "[- ]?") + r"\b"
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
+def _retag_with_model(config, args, store, source, hinted, rules) -> tuple[int, int]:
+    """Ask the summarizer for the project of items with no source hint whose tag is not
+    named in their own text. Returns (asked, changed); prints old -> new per item."""
+    import asyncio
+
+    from .summarize import Summarizer
+
+    items = [
+        i
+        for i in store.timeline(source=source, limit=1_000_000)
+        if i.external_id not in hinted and i.project and not _mentions(i.project, i)
+    ]
+    if not items:
+        return 0, 0
+    summarizer = Summarizer(config.summarizer, known_projects=config.summarizer.known_projects)
+
+    async def ask(item):
+        text = "\n".join([item.title, item.summary, *(f"{a.kind}: {a.text}" for a in item.atoms)])
+        try:
+            return item, rules.rename(await summarizer.guess_project(text))
+        except Exception as exc:  # one failed call skips one item, never the rest
+            print(f"[{item.id}] skipped: {exc}", file=sys.stderr)
+            return item, item.project
+
+    answers = asyncio.run(_gather(ask(i) for i in items))
+    changes = []
+    unsupported = 0
+    for item, new in answers:
+        if not new or new == item.project:
+            continue
+        # An answer the item's own text never names is no better supported than the old
+        # tag: models still drift to listed slugs. Keep the old tag then.
+        if not _mentions(new, item):
+            unsupported += 1
+            continue
+        changes.append({"id": item.id, "old": item.project, "new": new})
+        print(f"[{item.id}] {item.project} -> {new}  {item.title[:70]}", file=sys.stderr)
+        if not args.dry_run:
+            store.set_project(source, item.external_id, new)
+    if args.log and changes:
+        with Path(args.log).open("a", encoding="utf-8") as log:
+            log.writelines(json.dumps(c) + "\n" for c in changes)
+    moved = len(changes)
+    usage = summarizer.usage
+    print(
+        f"model: {usage.calls} calls, {usage.input_tokens} input and "
+        f"{usage.output_tokens} output tokens; {unsupported} answers not named in the "
+        "item's text were left out",
+        file=sys.stderr,
+    )
+    return len(items), moved
+
+
+async def _gather(coros):
+    import asyncio
+
+    return await asyncio.gather(*coros)
 
 
 def cmd_resummarize(config: Config, args: argparse.Namespace) -> int:
@@ -841,6 +916,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--connector", required=True, help="connector whose items are retagged")
     p.add_argument("--dry-run", action="store_true", help="count changes without writing")
+    p.add_argument(
+        "--ask-model",
+        action="store_true",
+        help="also ask the summarizer for the project of items whose source gives none and "
+        "whose tag their own text never mentions (one short call each, from the summary)",
+    )
+    p.add_argument("--log", metavar="PATH", help="write every change (id, old, new) as JSON lines")
     p.set_defaults(fn=cmd_retag)
 
     sub.add_parser(

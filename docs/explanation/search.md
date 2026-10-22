@@ -150,6 +150,15 @@ relevance fully by recency. The options are described in the
 The point of the boost is in the README: an old price or an abandoned decision should not
 outrank the current one. Recency alone cannot guarantee that, which is why `later` exists.
 
+## Copies of one session
+
+The same session can reach the library twice: an orchestrator that copied an agent's
+config folder to make another, or a session read both on the server and from a device's
+inbox. Both items share `original_ref` and `external_id` (the same segment of the same
+original), so `search`, `later` and `timeline` show only the best-ranked copy, and a
+result list does not spend two places on one answer. A client that can read only one of
+the sources still sees its copy.
+
 ## Limits and filters
 
 - `search` returns `default_limit` results (10) unless the caller asks for a number; any

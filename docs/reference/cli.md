@@ -322,13 +322,15 @@ jezero resummarize [-h] [--ids IDS] [--ids-file IDS_FILE]
 Re-apply the source's project hints and the project aliases, without the LLM.
 
 ```text
-jezero retag [-h] --connector CONNECTOR [--dry-run]
+jezero retag [-h] --connector CONNECTOR [--dry-run] [--ask-model] [--log PATH]
 ```
 
 | Argument | | Meaning |
 |---|---|---|
 | `--connector` `CONNECTOR` | required | connector whose items are retagged |
 | `--dry-run` | optional | count changes without writing |
+| `--ask-model` | optional | also ask the summarizer for the project of items whose source gives none and whose tag their own text never mentions (one short call each, from the summary) |
+| `--log` `PATH` | optional | write every change (id, old, new) as JSON lines |
 
 ### `jezero health`
 

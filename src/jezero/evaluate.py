@@ -2,7 +2,8 @@
 
 A question file (TOML) lists cases. Each case is a question as someone would ask it and
 the ids of the items that answer it; a case passes when one of those ids is in the top
-`k` results. `later` cases check the `later` tool instead: starting from an item that
+`k` results (a copy of one of them, the same session read from another source, counts
+too). `later` cases check the `later` tool instead: starting from an item that
 holds an old decision, one of the expected newer items must come back.
 
 The score is the same search the MCP server runs (BM25 plus the recency boost from
@@ -131,6 +132,9 @@ def run_cases(
         scope = case.sources if case.sources is not None else sources
         allowed = store.resolve_sources(scope)
         missing = [i for i in case.expect if store.get(i) is None]
+        # A copy of an expected item (the same session read from two sources) is the
+        # same answer; search shows only one of them.
+        valid = store.copies(case.expect)
         if case.kind == "later":
             start = store.get(case.item) if case.item is not None else None
             if start is None:
@@ -157,7 +161,7 @@ def run_cases(
                 recency_weight=search.recency_weight,
             )
             got = [h.item.id for h in hits]
-        rank = next((n for n, i in enumerate(got, start=1) if i in case.expect), None)
+        rank = next((n for n, i in enumerate(got, start=1) if i in valid), None)
         results.append(
             CaseResult(case.id, case.kind, rank is not None, rank, got, sorted(set(missing)))
         )

@@ -151,3 +151,21 @@ def test_redact_stored_rewrites_items_and_index(tmp_path) -> None:
     assert not store.search("abcd1234efgh5678ijkl")
     assert store.search("Deploy notes")
     assert store.redact_stored(redact, dry_run=False) == (0, 0)
+
+
+def test_copies_of_one_segment_take_one_place(store: Store) -> None:
+    from dataclasses import replace
+
+    a = replace(
+        make_item("s1#0", "Invoice export format", "CSV chosen for the export"),
+        original_ref="claude-code-session:s1",
+    )
+    copy = replace(a, source="agent-copy")
+    other_part = replace(a, external_id="s1#40", title="Invoice export follow-up")
+    store.upsert_many([a, copy, other_part])
+    hits = search(store, "invoice export")
+    assert len(hits) == 2  # the copy is dropped, the other segment stays
+    assert {h.item.external_id for h in hits} == {"s1#0", "s1#40"}
+    only_copy = search(store, "invoice export", allowed_sources=["agent-copy"])
+    assert [h.item.source for h in only_copy] == ["agent-copy"]  # still readable alone
+    assert len(store.timeline(limit=10)) == 2

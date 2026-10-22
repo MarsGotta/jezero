@@ -513,7 +513,23 @@ class Store:
             score = relevance * ((1.0 - recency_weight) + recency_weight * decay)
             hits.append(SearchHit(item=item, score=score, relevance=relevance))
         hits.sort(key=lambda h: h.score, reverse=True)
-        return hits[:limit]
+        return _one_per_copy(hits, key=lambda h: h.item)[:limit]
+
+    def copies(self, item_ids: Sequence[int]) -> set[int]:
+        """The given ids plus every item holding the same segment of the same original
+        (same `original_ref` and `external_id`, in another source)."""
+        found = set(item_ids)
+        if not item_ids:
+            return found
+        marks = ",".join("?" * len(item_ids))
+        with self._read() as con:
+            rows = con.execute(
+                "SELECT b.id FROM items a JOIN items b ON b.original_ref = a.original_ref "  # noqa: S608
+                f"AND b.external_id = a.external_id WHERE a.id IN ({marks}) "
+                "AND a.original_ref IS NOT NULL",
+                list(item_ids),
+            ).fetchall()
+        return found | {r[0] for r in rows}
 
     def get(self, item_id: int, *, allowed_sources: Sequence[str] | None = None) -> Item | None:
         with self._read() as con:
@@ -560,9 +576,10 @@ class Store:
             params.append(until.astimezone(UTC).isoformat())
         clause = f"WHERE {' AND '.join(where)}" if where else ""
         sql = f"SELECT * FROM items {clause} ORDER BY occurred_at DESC LIMIT ?"  # noqa: S608
-        params.append(limit)
+        params.append(limit * 2 + 10)  # room for the copies dropped below
         with self._read() as con:
-            return [_row_to_item(r) for r in con.execute(sql, params).fetchall()]
+            items = [_row_to_item(r) for r in con.execute(sql, params).fetchall()]
+        return _one_per_copy(items, key=lambda i: i)[:limit]
 
     def overview(
         self,
@@ -641,6 +658,27 @@ def _item_values(item: NewItem) -> dict[str, str]:
         "questions": json.dumps(item.questions, ensure_ascii=False),
         "atoms": json.dumps([a.to_dict() for a in item.atoms], ensure_ascii=False),
     }
+
+
+def _one_per_copy(entries: list, *, key) -> list:
+    """Keep the first entry of each copy group, in order.
+
+    Two sources can hold the same session (an agent's config folder copied to make
+    another, or a session read both from a device inbox and from the host): their items
+    share `original_ref` and `external_id`, the same segment of the same original. Showing
+    both would spend two places of a result list on one answer.
+    """
+    seen: set[tuple[str, str]] = set()
+    kept = []
+    for entry in entries:
+        item = key(entry)
+        if item.original_ref:
+            copy = (item.original_ref, item.external_id)
+            if copy in seen:
+                continue
+            seen.add(copy)
+        kept.append(entry)
+    return kept
 
 
 def _row_to_item(row: sqlite3.Row) -> Item:

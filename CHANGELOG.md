@@ -123,6 +123,16 @@
   (`skip_project_dirs`).
 - The MCP server unit stops within 10 s: clients keep streams open and the default 90 s
   wait made restarts slow.
+- Search, `later` and `timeline` show one item per copy of a segment (same
+  `original_ref` and `external_id` in two sources); `jezero eval` counts a copy of an
+  expected item as a hit.
+- The summarizer is told that the order of `known_projects` means nothing and to use one
+  only when the document is about it: models picked the first listed slugs for unrelated
+  sessions.
+- `jezero retag --ask-model` re-asks the model, from the stored summary, the project of
+  items whose source gives none and whose tag their own text never mentions, and moves
+  an item only when its text names the new project; prints `old -> new`, `--log` keeps
+  the changes.
 - `jezero eval`: a TOML file of questions and the items that answer them, scored with the
   same search the MCP server runs (top-k hits, hit@1, MRR), with `later` cases for
   decisions that changed, a client's scope (`--client`, `--sources`), `--save` and

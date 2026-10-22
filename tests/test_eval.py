@@ -97,3 +97,43 @@ def test_bad_files_say_why(cfg: Path, tmp_path: Path, capsys, body: str, message
     capsys.readouterr()
     assert main(["-c", str(cfg), "eval", str(questions)]) == 2
     assert message in capsys.readouterr().err
+
+
+def test_a_copy_of_an_expected_item_counts(cfg: Path, tmp_path: Path, capsys) -> None:
+    import sqlite3
+
+    db = tmp_path / "lib.db"
+    con = sqlite3.connect(db)
+    con.execute("UPDATE items SET original_ref = 'demo:1' WHERE id = 1")
+    con.commit()
+    con.close()
+    from dataclasses import replace
+
+    from jezero.store import Store
+
+    store = Store(db)
+    item = store.get(1)
+    assert item is not None
+    from jezero.models import NewItem
+
+    copy = NewItem(
+        source="mirror",
+        external_id=item.external_id,
+        occurred_at=item.occurred_at,
+        title=item.title + " (mirror, migration rollback invoices)",
+        summary=item.summary + " invoices migration rollback",
+        questions=[],
+        atoms=[],
+        project=item.project,
+        original_ref="demo:1",
+    )
+    store.upsert_many([replace(copy)])
+    assert store.copies([1]) == {1, 4}
+    questions = tmp_path / "q.toml"
+    questions.write_text(
+        '[[case]]\nid = "c"\nquestion = "invoices migration rollback"\nexpect = [1]\n'
+    )
+    capsys.readouterr()
+    assert main(["-c", str(cfg), "eval", str(questions), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["passed"] == 1
