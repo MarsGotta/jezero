@@ -15,8 +15,10 @@ agent](connect-agents.md#before-you-start)).
    python3 ~/.jezero-src/jezero-client/jezero_client.py status
    ```
 
-   You should see `HTTP 200` and the number of queued sessions, or `read-only, N readable
-   sources` on a read-only computer.
+   You should see the client home in use (`key: /home/me/.jezero`), `HTTP 200`, the
+   number of queued sessions and of rejected uploads, or `read-only, N readable sources`
+   on a read-only computer. Add `--agent claude-code` (or `codex`, `antigravity`...) to
+   check the key that agent uses.
 
 2. Read the client's log, `client.log` in the [client
    home](devices.md#where-the-key-lives) (`~/.jezero/client.log` by default). Hooks and
@@ -38,9 +40,21 @@ agent](connect-agents.md#before-you-start)).
    - [212] 2026-09-10 Atlas: run the migration in batches
    ```
 
+   Nothing at all means the hook found no key in this client home.
+
 An agent that keeps its key in its own folder (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
 `JEZERO_CLIENT_HOME`) uses a different client home than your shell. Run these checks with
-the same variables set.
+the same variables set, or with `--agent`.
+
+On the server, two commands show the other side:
+
+```bash
+jezero device list
+jezero connector list
+```
+
+The first lists every key with what it may read and whether it may upload; the second
+every connector with its last run, last success, error and items.
 
 ## Keys and connection
 
@@ -52,24 +66,24 @@ read-only computer: `cannot read https://YOUR-JEZERO: mcp list_sources: HTTP 401
 report the `jezero` MCP server as failed or asking for authentication.
 
 **Why.** The server has no `[[clients]]` block with this key's fingerprint. Either the
-key was never approved, the server was not restarted after `jezero device approve`, the
-fingerprint was copied wrong, or the computer made a new key with `init --force`
-afterwards. The key may also come from another client home than the one you approved.
+key was never approved, it was revoked, the fingerprint was copied wrong, or the computer
+made a new key with `init --force` afterwards. The key may also come from another client
+home than the one you approved (the `key:` line of `status` says which).
 
-**Fix.** Check that `jezero.toml` has the device's block and restart the server. If the
-key changed, approve the new fingerprint as in [Rotate a
-key](devices.md#rotate-a-key). If you lost the approve line, run `init --force` and
-approve the new one.
+**Fix.** On the server, `jezero device list` shows the approved names. Approving takes
+effect within a second, with no restart. If the computer made a new key, give the server
+its fingerprint with [`jezero device rotate`](devices.md#rotate-a-key). If `jezero.toml`
+no longer loads, the server keeps the keys it had: see [A change to `jezero.toml` has no
+effect](#a-change-to-jezerotoml-has-no-effect).
 
 ### `HTTP 403 this key may not upload`
 
 **What you see.** `status` prints
-`HTTP 403 {"ok":false,"error":"this key may not upload"}`, and `client.log` has lines
-like `upload claude-code projects/...: HTTP 403`.
+`HTTP 403 {"ok":false,"error":"this key may not upload"}`, followed by `uploads refused
+since ...` when sessions wait. See [Uploads refused](#uploads-refused).
 
 **Why.** The computer uploads, but the server approved its key with `--read-only`
-(`upload = false`). The server refuses every upload, and the client drops the refused
-sessions instead of retrying them.
+(`upload = false`).
 
 **Fix.** Decide what the computer should be and make both sides agree: see [Read-only or
 uploading](devices.md#read-only-or-uploading). On a computer that should only read, add
@@ -83,14 +97,14 @@ uploading](devices.md#read-only-or-uploading). On a computer that should only re
 **Why.** The client home already holds a key. `init` never replaces one by accident.
 
 **Fix.** Keep the existing key if it works (`status`). `--force` makes a new key, which
-the admin must approve again.
+the admin must then give to the server with `jezero device rotate`: see [Rotate a
+key](devices.md#rotate-a-key).
 
 ### Server not reachable
 
 **What you see.** `status` prints `cannot reach https://YOUR-JEZERO: <urlopen error ...>`
 (connection refused, name not found, timeout). Hooks give the protocol but no recent
-work, and the Hermes tools and the Antigravity bridge answer `Jezero is not reachable
-right now`.
+work, and the Hermes tools and the MCP bridge answer `Jezero is not reachable right now`.
 
 **Why.** The computer cannot reach the server: the server is down, the private network or
 VPN is off, or the name does not resolve on this computer. Agents in a sandbox may have
@@ -101,15 +115,20 @@ network, then `status` again. Nothing is lost meanwhile: uploads wait in the que
 
 ### `Invalid Host header`
 
-**What you see.** Requests get status 421 with the body `Invalid Host header`.
+**What you see.** Requests get status 421 with the body `Invalid Host header`: `status`
+prints `HTTP 421 Invalid Host header`, uploads stay queued, and agents cannot reach the MCP
+server.
 
 **Why.** The server rejects requests for a host name it does not know (protection
-against DNS rebinding). It knows `127.0.0.1`, `localhost`, the host of
-`server.public_url` and the names in `server.allowed_hosts`.
+against DNS rebinding), on every route: MCP, uploads, the key check, the dashboard and
+the bundle. It knows `127.0.0.1`, `localhost`, `[::1]`, its own `server.host`, the host of
+`server.public_url` and the names in `server.allowed_hosts`. A server listening on
+`0.0.0.0` that a computer reaches by a LAN address (`http://192.0.2.10:8765`) gets 421
+until that address is listed.
 
-**Fix.** Set `public_url` to the address computers use, add any other name to
-`allowed_hosts`, and restart the server. See [Reach it from other
-computers](deploy.md#reach-it-from-other-computers).
+**Fix.** Set `public_url` to the address computers use, add any other name or address to
+`allowed_hosts`, and restart the server: `[server]` settings are read at start. See [Reach
+it from other computers](deploy.md#reach-it-from-other-computers).
 
 ### TLS or certificate errors
 
@@ -130,19 +149,76 @@ export JEZERO_CA_FILE=/home/me/certs/company-root.pem
 ```
 
 Set it where the agent runs, not only in your shell. The fix covers the client core
-(hooks, uploads, the Hermes tools and the Antigravity bridge). Agents that connect to the
-MCP server themselves, such as Claude Code, Codex and OpenCode, use their own trust
-settings: for Claude Code, set `NODE_EXTRA_CA_CERTS` to the same file.
+(hooks, uploads, the Hermes tools and the MCP bridge that Claude Code, Codex and
+Antigravity use). OpenCode connects to the MCP server itself and uses its own trust
+settings, as does any MCP client you configured with a URL.
 
 ### The bundle download fails with 404
 
 **What you see.** `curl` on `https://YOUR-JEZERO/client/jezero-client.tar.gz` gets 404,
-with `{"ok":false,"error":"no client bundle built"}`.
+with `{"ok":false,"error":"no client bundle built: run python3 scripts/build_clients.py on
+the server to build it"}`. The server's log warned about it at start: `client bundle not
+found at ...`.
 
 **Why.** The server offers the bundle only after it has been built.
 
 **Fix.** Build it on the server: see [Serve the plugin
 bundle](deploy.md#serve-the-plugin-bundle).
+
+## Server
+
+### `check-config` lists problems
+
+**What you see.** `jezero check-config` ends with a `problems:` list and exits with 1:
+
+```text
+problems:
+  - summarizer.model is not set, and 2 connector(s) are enabled
+  - JEZERO_SUMMARIZER_API_KEY (summarizer.api_key_env) is not set, and 2 connector(s) are enabled
+  - client admin: JEZERO_ADMIN_TOKEN is not set, so it cannot log in
+```
+
+**Why.** The file is valid, but something it relies on is missing: enabled connectors
+need a summarizer model and its API key, a client with `token_env` needs that variable,
+and `require_auth` needs at least one client. A library without enabled connectors, such
+as the one of [the tutorial](../getting-started/tutorial.md), needs no summarizer.
+
+**Fix.** Set what each line names, in `jezero.toml` or in the `.env` file next to it (see
+[Configuration](../reference/configuration.md)), and run `check-config` again until it
+exits with 0. A file that does not load at all prints `invalid config:` and the reason
+instead, and exits with 2.
+
+### A connector fails with `folder not found`
+
+**What you see.** `jezero run` prints, for example,
+`{"connector": "agent-claude-code", "error": "FileNotFoundError: projects_dir folder not
+found: /home/me/.claude/projects"}`, and `jezero health` reports it as `failing`.
+
+**Why.** A folder or file named in the connector's options does not exist: a typo, an
+agent not installed on this computer, or a disk not mounted. Every connector type checks
+its own option (`projects_dir`, `sessions_dir`, `export_dir`, `transcripts_dir`,
+`data_dir`, `state_db`, `db_path`). For a `sessions_dir` with a wildcard, the folder
+before the first wildcard must exist: `/home/me/agents/*/codex/sessions` fails with
+`sessions_dir folder not found: /home/me/agents`.
+
+**Fix.** Correct the path, or set `enabled = false` until the source exists. Inbox
+connectors written by `jezero device approve` get their folders created, so this error
+there means the inbox moved.
+
+### A change to `jezero.toml` has no effect
+
+**What you see.** A key you approved, rotated or revoked still behaves as before, and the
+server's log has `config changed but could not be loaded; keeping the previous N
+clients: ...`.
+
+**Why.** The server reads `[[clients]]` again whenever the file changes, but only if the
+whole file still loads. Otherwise it keeps the clients it had, so a typo cannot lock
+everyone out. Other settings, such as `[server]` and `[inbox]`, are read only at start.
+
+**Fix.** Run `jezero check-config`, fix what it reports, and save the file again. The
+`jezero device` commands check the file before they write it and keep a copy,
+`jezero.toml.bak-<UTC time>`, next to it. After changing `[server]` or `[inbox]`, restart
+the server.
 
 ## Agents
 
@@ -153,11 +229,17 @@ bundle](deploy.md#serve-the-plugin-bundle).
 
 **Why and fix, per agent:**
 
-- **Claude Code, Codex**: the plugin brings hooks and the skill, not the MCP server. Run
-  `jezero_client.py setup --agent claude-code` (or `codex`) and restart the agent. Check
-  with `claude mcp list` or `codex mcp list`. If `setup` says `claude: not found,
-  skipped`, the `claude` command is not on `PATH` (nor in `~/.local/bin`); for Codex,
-  neither `CODEX_HOME` nor the `codex` command exists.
+- **Claude Code**: the plugin brings the hooks, the skill and the MCP server (the stdio
+  bridge). Check `claude plugin list` and `claude mcp list`; restart Claude Code after
+  installing. Without the plugin, run `jezero_client.py setup --agent claude-code`. If
+  `setup` says `claude: not found, skipped`, the `claude` command is not on `PATH` (nor
+  in `~/.local/bin`). If the bridge answers `Jezero is not connected on this computer (no
+  key in ...)`, the key is in another client home: see [Agents in a
+  sandbox](devices.md#agents-in-a-sandbox).
+- **Codex**: the plugin brings hooks and the skill, not the MCP server. Run
+  `jezero_client.py setup --agent codex` and restart Codex. Check with `codex mcp list`.
+  If `setup` says `codex: not found, skipped`, neither `CODEX_HOME` nor the `codex`
+  command exists.
 - **OpenCode**: the plugin registers the MCP server only when it finds a key as OpenCode
   starts. Restart OpenCode after `init`. An `mcp.jezero` entry of your own in OpenCode's
   config takes precedence, with whatever key it holds.
@@ -171,6 +253,19 @@ bundle](deploy.md#serve-the-plugin-bundle).
 
 If the tools are there but the agent rarely calls them, check that the session-start
 hook runs (next entry): the protocol is what makes searching a habit.
+
+### The app says `old MCP entry with the key in clear: run setup`
+
+**What you see.** In the app's Agents view, Claude Code or Codex shows `old MCP entry
+with the key in clear: run setup`.
+
+**Why.** An older client wrote the key into the agent's configuration (`~/.claude.json`,
+or `url` and `http_headers` in Codex's `config.toml`).
+
+**Fix.** Run `jezero_client.py setup --agent claude-code` (or `codex`). It removes the old
+entry and, unless the Claude Code plugin already brings the bridge, registers the bridge
+in its place. Then treat the key as exposed if those files were shared or backed up:
+[rotate it](devices.md#rotate-a-key).
 
 ### Hooks do not run
 
@@ -220,13 +315,14 @@ headless run has nobody to ask.
 ### `claude -p` denies the Jezero tools
 
 **What you see.** A non-interactive `claude -p` run reports that it has no permission to
-use `mcp__jezero__search`.
+use the Jezero `search` tool (`mcp__plugin_jezero_jezero__search` with the plugin,
+`mcp__jezero__search` with a server added by `setup` or by hand).
 
 **Why.** Claude Code asks before using an MCP tool, and `-p` runs cannot ask.
 
-**Fix.** Add `"mcp__jezero"` to `permissions.allow` in `~/.claude/settings.json` (or in
-`CLAUDE_CONFIG_DIR`), or pass `--allowedTools mcp__jezero` to the run. See [Connect an
-agent](connect-agents.md#claude-code).
+**Fix.** Add `"mcp__plugin_jezero_jezero"` (plugin) or `"mcp__jezero"` (`setup`) to
+`permissions.allow` in `~/.claude/settings.json` (or in `CLAUDE_CONFIG_DIR`), or pass the
+same name to `--allowedTools`. See [Connect an agent](connect-agents.md#claude-code).
 
 ## Uploads
 
@@ -237,21 +333,25 @@ agent](connect-agents.md#claude-code).
 **Why and fix, in the order to check:**
 
 1. **The computer is read-only.** `status` says `read-only`, and `backfill` says
-   `read-only computer (init --no-upload): nothing to upload`. See [Read-only or
-   uploading](devices.md#read-only-or-uploading).
-2. **The hooks do not run.** See [Hooks do not run](#hooks-do-not-run).
-3. **The session is still going.** A stop uploads at most once every 15 minutes per
+   `claude-code: read-only computer (init --no-upload): nothing to upload`. See [Read-only
+   or uploading](devices.md#read-only-or-uploading).
+2. **The server refuses the key.** `status` shows `uploads refused since ...`: see
+   [Uploads refused](#uploads-refused).
+3. **The hooks do not run.** See [Hooks do not run](#hooks-do-not-run).
+4. **The session is still going.** A stop uploads at most once every 15 minutes per
    session; the full session goes when it ends. OpenCode uploads when a session goes
    idle, Hermes Agent at the end of a turn. Run `jezero_client.py flush` to send what is
    queued now.
-4. **The session is of a kind Jezero skips.** Claude Code subagent transcripts, and
+5. **The session is of a kind Jezero skips.** Claude Code subagent transcripts, and
    Hermes Agent scheduled jobs and subagent sessions, are never uploaded.
-5. **It arrived but is not read yet.** Look in the device's inbox folder on the server
+6. **The server rejected the file.** `status` shows `rejected uploads: N` and why: see
+   [Rejected uploads](#rejected-uploads).
+7. **It arrived but is not read yet.** Look in the device's inbox folder on the server
    (`data/inbox/NAME/AGENT/` by default). If the files are there, the connectors are the
    cause: `device approve` creates them disabled, and they wait until a session has been
-   quiet for `settle_minutes` (30 by default). Pilot and enable them: see [Add a
-   computer](devices.md#add-a-computer), step 6.
-6. **Older sessions.** The plugins send sessions from the moment they are installed. Send
+   quiet for `settle_minutes` (30 by default). `jezero connector list` shows which are
+   enabled. Pilot and enable them: see [Add a computer](devices.md#add-a-computer).
+8. **Older sessions.** The plugins send sessions from the moment they are installed. Send
    earlier ones with [`backfill`](devices.md#the-upload-queue).
 
 ### Uploads stay queued
@@ -260,17 +360,61 @@ agent](connect-agents.md#claude-code).
 
 **Why.** The background flush stops at the first failure and keeps the rest, so an
 unreachable server keeps everything queued. `client.log` says why, for example
-`flush stopped at ...: <urlopen error [Errno 111] Connection refused>`. Only one flush
-runs at a time; a flush that died leaves a lock that expires after 10 minutes.
+`flush stopped at ...: <urlopen error [Errno 111] Connection refused>`. A server that
+refuses the key keeps the queue too: see [Uploads refused](#uploads-refused). Only one
+flush runs at a time; a flush that died leaves a lock that expires after 10 minutes.
 
-**Fix.** Fix the connection (see [Server not reachable](#server-not-reachable)), then send
-the queue:
+**Fix.** Fix the connection (see [Server not reachable](#server-not-reachable) and
+[`Invalid Host header`](#invalid-host-header)), then send the queue:
 
 ```bash
 python3 ~/.jezero-src/jezero-client/jezero_client.py flush
 ```
 
 You should see `"failed": 0` in its counts.
+
+### Uploads refused
+
+**What you see.** `status` shows a line like this, and the queue does not shrink:
+
+```text
+uploads refused since 2026-10-22 03:32: HTTP 403 {"ok":false,"error":"this key may not upload"} (the queue is kept)
+```
+
+`client.log` has, once: `uploads refused by the server (HTTP 403 ...): the queue stays
+until the server's admin allows this key to upload (upload = true in its [[clients]]
+block, picked up within a second)`.
+
+**Why.** The server answered 401 (the key is unknown: not approved yet, revoked or
+rotated) or 403 (the key may only read). The client keeps every queued session instead of
+dropping them, since the key may be approved for uploads later.
+
+**Fix.** On the server, check the device with `jezero device list`. For a 401, approve
+the key, or rotate it if the computer made a new one; for a 403, allow uploads (see
+[Read-only or uploading](devices.md#read-only-or-uploading)). The server picks the change
+up within a second; then run `flush` on the computer. If the computer should only read,
+add `"upload": false` to its `client.json` instead, and delete what waits in
+`spool/pending/` of the client home.
+
+### Rejected uploads
+
+**What you see.** `status` shows `rejected uploads: N` and the newest ones:
+
+```text
+rejected uploads: 1
+  2026-10-22 03:35 claude-code: HTTP 413 {"ok":false,"error":"file too large"}
+```
+
+**Why.** The server refused that file for good: HTTP 413 for a file above
+[`inbox.max_mb`](../reference/configuration.md#inbox) (64 MB after decompression by
+default), 400 for a path or body it does not accept, 415 for an encoding it does not
+read. The client records the file as rejected and does not send it again until the file
+changes. The other sessions are not held up.
+
+**Fix.** For 413, raise `inbox.max_mb` on the server and restart it, then touch the
+session file on the computer or let the agent change it, and `flush`. A 400 or 415 points
+at a client older than the server: update the plugins (see [Connect an
+agent](connect-agents.md)).
 
 ### Items have no project
 

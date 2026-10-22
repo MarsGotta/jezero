@@ -94,8 +94,10 @@ must point the units at that command and at your config yourself.
    database ready at /home/me/jezero/data/jezero.db
    ```
 
-   Every variable should say `set`. `check-config` exits with 1 when `require_auth` is on
-   and no client is configured.
+   Every variable should say `set`. When something is missing, `check-config` ends with a
+   `problems:` list and exits with 1: enabled connectors without `summarizer.model` or
+   its API key, a client whose `token_env` variable is not set, or `require_auth` on with
+   no client configured.
 
 ## Start the services
 
@@ -200,15 +202,17 @@ through a reverse proxy with TLS, on a private network such as a VPN or a mesh n
    ```
 
    The server rejects requests whose `Host` header it does not know (protection against
-   DNS rebinding). `public_url` adds its host name; requests on `127.0.0.1` and
-   `localhost` are always accepted. If the proxy also answers on other names, list them in
-   [`allowed_hosts`](../reference/configuration.md#server):
+   DNS rebinding), on every route: MCP, uploads, the key check, the dashboard and the
+   bundle. `public_url` adds its host name; `127.0.0.1`, `localhost`, `[::1]` and
+   `server.host` are always accepted. If the proxy also answers on other names, list them
+   in [`allowed_hosts`](../reference/configuration.md#server):
 
    ```toml
    allowed_hosts = ["jezero.example.internal", "jezero"]
    ```
 
-   Keep `path = "/mcp"`: the plugins always call `/mcp` on the server's address.
+   Keep `path = "/mcp"` if you can. With another path, every computer must say so when it
+   creates its key, with `jezero_client.py init --mcp-path PATH`.
 
 3. Restart the server and check the name from another computer:
 
@@ -232,7 +236,9 @@ through a reverse proxy with TLS, on a private network such as a VPN or a mesh n
 Without a proxy, you can bind `server.host` to the server's address on the private
 network instead, if that network already encrypts traffic. Keep `require_auth = true`:
 Jezero rejects a config that turns authentication off on any address other than
-loopback.
+loopback. With `host = "0.0.0.0"`, list in `allowed_hosts` every address or name the
+computers use to reach it (`"192.0.2.10:*"`): any other gets status 421, uploads
+included.
 
 > [!WARNING]
 > Do not publish Jezero on the public internet. Every MCP and upload request needs a
@@ -264,18 +270,25 @@ Computers install the plugins from a bundle that your server offers at
 
 ## Restart after configuration changes
 
-`jezero serve` reads the config once, when it starts. Restart it after any change to
-`[server]`, `[[clients]]`, `[search]`, `[inbox]` or `[storage]`, which includes every
-[`jezero device approve`](../reference/cli.md#jezero-device-approve):
+`jezero serve` reads `[[clients]]` again by itself: at most once a second it checks
+whether `jezero.toml` changed, and if the file still loads, it takes the new list of
+clients. So [`jezero device approve`](../reference/cli.md#jezero-device-approve),
+`device revoke`, `device rotate` and edits to a client's `sources` or `upload` need no
+restart:
+
+```text
+approved laptop; the server picks up the new key within a second (backup: /home/me/jezero/jezero.toml.bak-20261022T034500Z)
+```
+
+If the edited file does not load, the server keeps the clients it had and logs
+`config changed but could not be loaded; keeping the previous N clients`. Run
+`jezero check-config` to find the error.
+
+Everything else the server reads once, when it starts. Restart it after any change to
+`[server]`, `[search]`, `[inbox]` or `[storage]`:
 
 ```bash
 systemctl --user restart jezero-serve.service
-```
-
-`device approve` reminds you:
-
-```text
-approved laptop; restart the MCP server so it accepts the new key
 ```
 
 The ingestion starts a new process on every timer tick, so changes to connectors, the

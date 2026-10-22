@@ -180,8 +180,11 @@ SHA-256 digest, as a ready-made `jezero device approve` line. The server stores 
 digest; the approval also creates the device's inbox connectors, disabled.
 
 **Consequences.** Nothing secret passes through the approval, and a copy of the server's
-config holds no usable key. Revoking is removing an entry and restarting. Sandboxed agents
-can hold their own key in their config folder. A lost device key cannot be recovered; the
+config holds no usable key. Revoking (`jezero device revoke`) and rotating (`jezero
+device rotate`) are edits to that config, which the server reads again within a second,
+so neither needs a restart. On the device, agents reach the server through a local bridge
+that reads the key file, so no agent's configuration holds the key either. Sandboxed
+agents can hold their own key in their config folder. A lost device key cannot be recovered; the
 device makes a new one.
 
 **Alternatives.** Admin-generated tokens remain available for other clients

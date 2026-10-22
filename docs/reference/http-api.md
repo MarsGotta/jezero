@@ -23,8 +23,16 @@ check, the plugin bundle, the dashboard counts and the OAuth metadata. Each is s
 - Errors of the inbox and overview routes are JSON: `{"ok": false, "error": "MESSAGE"}`.
   The message is safe to show to the user.
 
-The inbox routes always need a key, even with `[server].require_auth = false`. The
-`Host` check of the MCP route does not apply to them.
+The inbox routes always need a key, even with `[server].require_auth = false`.
+
+Every route, MCP included, checks the `Host` and `Origin` headers first, with the rules of
+[the MCP endpoint](mcp-tools.md#authentication): an unknown host gets HTTP 421 with the
+plain-text body `Invalid Host header`, an unknown browser origin HTTP 403 `Invalid Origin
+header`, before the key is looked at. A computer that reaches the server by a name or
+address missing from `public_url` and `allowed_hosts` is refused on every route.
+
+Keys are read again from `jezero.toml` within a second of a change, so a key approved,
+rotated or revoked with [`jezero device`](cli.md#jezero-device) needs no restart.
 
 ## Check a device key
 
@@ -48,8 +56,9 @@ You should see:
 |---|---|---|
 | 200 | `{"ok": true, "device": NAME, "version": VERSION}` | The key belongs to a client with `upload = true`. `device` is the client's name, `version` the server's. |
 | 401 | `{"ok": false, "error": "missing bearer token"}` | No `Authorization` header, or not `Bearer`. |
-| 401 | `{"ok": false, "error": "unknown token"}` | The key matches no client (or the server was not restarted after approval). |
+| 401 | `{"ok": false, "error": "unknown token"}` | The key matches no client: not approved yet, revoked, or replaced by `jezero device rotate`. |
 | 403 | `{"ok": false, "error": "this key may not upload"}` | The client exists but has `upload = false` (read-only). |
+| 421 | `Invalid Host header` (plain text) | The `Host` header is not an allowed host. |
 
 ## Upload a session file
 
@@ -63,9 +72,9 @@ like a local store (see [Connectors](connectors.md#source-names)).
 | Header | Required | Meaning |
 |---|---|---|
 | `Authorization` | yes | `Bearer <key>` of a client with `upload = true`. |
-| `Content-Encoding` | no | `gzip`, or absent / `identity` for the raw bytes. Nothing else. |
+| `Content-Encoding` | no | `gzip`, `zstd`, or absent / `identity` for the raw bytes (case does not matter). Nothing else. |
 | `X-Jezero-Project` | no | The project the device found for this session. Must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`. |
-| `Content-Length` | no | When larger than the limit, the upload is refused before the body is read. |
+| `Content-Length` | no | When larger than the limit, the upload is refused before the body is read. A body sent without it (chunked) is read up to the limit and refused with 413 as soon as it passes. |
 
 The body is the file itself. `{agent}` and `{relpath}` must match one of these:
 
@@ -115,23 +124,26 @@ You should see:
 | 400 | `unknown agent 'cursor'; known: ['antigravity', 'claude-code', 'codex', 'hermes', 'opencode']` | `{agent}` is not in the table. |
 | 400 | `path not accepted for claude-code: 'other/x.jsonl'` | `{relpath}` does not match the agent's pattern, or has a `..` segment. |
 | 400 | `path escapes the inbox` | The resolved path leaves the device's folder. |
-| 400 | `body is not valid gzip` | `Content-Encoding: gzip` with a body that is not gzip. |
+| 400 | `body is not valid gzip` | `Content-Encoding: gzip` with a body that is not gzip (`zstd`: `body is not valid zstd`). |
 | 400 | `empty body` | The file is empty. |
 | 400 | `invalid project name` | `X-Jezero-Project` does not match its pattern. |
 | 401 | `missing bearer token` | No `Authorization: Bearer` header. |
 | 401 | `unknown token` | The key matches no client. |
 | 403 | `this key may not upload` | The client has `upload = false`. |
 | 403 | `bad device name` | The client's name is not a valid device name. |
-| 413 | `file too large` | Declared or decompressed size above the limit. |
-| 415 | `unsupported Content-Encoding 'zstd'` | Any encoding other than `gzip` or `identity`. |
+| 413 | `file too large` | Declared, received or decompressed size above the limit. |
+| 415 | `unsupported Content-Encoding 'br'; use gzip, zstd or none` | Any encoding other than `gzip`, `zstd` or `identity`. |
+| 421 | `Invalid Host header` (plain text) | The `Host` header is not an allowed host: see [Routes](#routes). |
 
-The checks run in this order: key, agent and path, declared size, body decoding, empty
-body, project.
+The checks run in this order: host, key, agent and path, declared size, received size,
+body decoding, empty body, project.
 
 > [!NOTE]
-> The client core drops a file for good after a 400, 403, 413 or 415, since the server
-> will never accept it, and keeps it queued after a 401, a 5xx or a network error. See
-> [the upload queue](client.md#upload-queue).
+> The client core keeps the whole queue after a 401 or 403 (the key may be approved for
+> uploads later), a 5xx or a network error. After a 400, 413 or 415 it records the file as
+> *rejected*, drops it from the queue and does not send it again until the file changes;
+> `jezero_client.py status` lists the rejected files. See [the upload
+> queue](client.md#upload-queue).
 
 ## Overview
 
@@ -182,13 +194,14 @@ You should see:
 | `sources` | object | Per source: `items`, `latest` (`occurred_at` of the newest item) and `daily` (items per day, aligned with `days`, by `occurred_at`). |
 | `projects` | object | Per project (items with no project are left out): `items` and `latest`, newest project first. |
 
-When the key's `sources` match no stored source, the answer is
-`{"ok": true, ..., "items": 0, "days": [], "sources": {}, "projects": {}}`.
+When the key's `sources` match no stored source, the answer has the same shape with
+nothing in it: `"items": 0`, the usual `days`, and empty `sources` and `projects`.
 
 | Status | Body | When |
 |---|---|---|
 | 200 | as above | |
 | 401 | `{"ok": false, "error": "unknown token"}` | No key, not `Bearer`, or a key that matches no client. Not with `require_auth = false`. |
+| 421 | `Invalid Host header` (plain text) | The `Host` header is not an allowed host. |
 
 ## Client bundle
 
@@ -208,7 +221,8 @@ curl -fsSL https://YOUR-JEZERO/client/jezero-client.tar.gz | tar -xz -C ~/.jezer
 | Status | Body | When |
 |---|---|---|
 | 200 | the file, `Content-Type: application/gzip` | |
-| 404 | `{"ok": false, "error": "no client bundle built"}` | `client_bundle` is not set, or the file does not exist. |
+| 404 | `{"ok": false, "error": "no client bundle built: run python3 scripts/build_clients.py on the server to build it"}` | The file does not exist. The server also logs a warning with the path at start. |
+| 421 | `Invalid Host header` (plain text) | The `Host` header is not an allowed host. |
 
 ## OAuth protected resource metadata
 

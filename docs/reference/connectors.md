@@ -14,7 +14,7 @@ A connector is one `[[connectors]]` block of `jezero.toml`; its `name` becomes t
 | `hermes` | available | Hermes Agent's `state.db`, or session exports uploaded by a device | [hermes](#hermes) |
 | `antigravity` | available | Antigravity's local store, or transcripts uploaded by a device | [antigravity](#antigravity) |
 | `paperclip` | available | Paperclip tasks: issues with comments, documents and decisions, over its API | [paperclip](#paperclip) |
-| `jsonl` | available | Pre-summarised items, loaded by `jezero import-jsonl` (never scheduled) | [jsonl](#jsonl) |
+| `jsonl` | available | Pre-summarised items, loaded by `jezero import-jsonl`; a `[[connectors]]` block of this type is refused | [jsonl](#jsonl) |
 | `gmail` | planned | Not implemented: listed so `check-config` can tell it from a typo | [gmail](#gmail) |
 
 `jezero check-config` lists the configured connectors and marks planned types as "not
@@ -44,7 +44,7 @@ These keys exist for every type. They are validated with the rest of the configu
 | `enabled` | boolean | `true` | `jezero run` without `--connector` skips disabled connectors; `jezero health` ignores them. |
 | `interval_minutes` | integer (≥ 1) | `15` | `jezero run --due` runs the connector only when this long has passed since its last run. |
 | `project` | string | none | Project for items whose source gives none (see [Projects](#projects)). |
-| `trust` | `"own"` \| `"external"` | `"own"` | Copied to every item. Use `external` for text written by third parties. |
+| `trust` | `"own"` \| `"external"` | the type's own | Copied to every item. `external` marks text written by third parties. Unset, it takes the type's default: `external` for `gmail`, `own` for every other type. |
 | `options` | table | empty | Type-specific options, below. |
 
 Option keys that look like a secret (`api_key`, `token`, `secret`, `password`, `passwd`,
@@ -82,7 +82,9 @@ The same steps apply to every scheduled type.
 
 1. **Collect.** The connector lists the units (sessions, conversations, issues) changed
    since its cursor. The cursor is a timestamp: a file's modification time, a session's
-   last message time, or an issue's last activity.
+   last message time, or an issue's last activity. A folder or file named in the options
+   that does not exist fails the run with `OPTION folder not found: PATH` (or `file not
+   found`), so a typo shows up in `jezero health` instead of as an empty source.
 2. **Settle.** Units changed in the last `settle_minutes` are deferred to a later run, so
    an ongoing session is not summarised every few minutes. `jezero run` reports them as
    `deferred_sessions`.
@@ -94,12 +96,20 @@ The same steps apply to every scheduled type.
 5. **Redact, compare, summarise.** Secrets are redacted. A segment whose redacted text has
    the same SHA-256 as the stored item is skipped as `unchanged`; the others go to the
    summarizer and are inserted or updated.
-6. **Advance.** The cursor moves only when every segment was stored and the connector
+6. **Prune.** When a unit is read again whole and no longer produces some of its stored
+   segments (`max_input_chars` changed, or the session got shorter), those items are
+   removed and counted in `pruned`. Nothing is pruned for a unit with a failed segment,
+   and a unit the source stops producing altogether is kept.
+7. **Advance.** The cursor moves only when every segment was stored and the connector
    reported no warning. Otherwise the same units are read again next run, and the error is
    kept in the connector's state for `jezero health`.
 
 `--limit N` processes at most N units, oldest first. `--sample N` processes the newest N
-units and leaves the cursor where it was (see [`jezero run`](cli.md#jezero-run)).
+units as a pilot: it stores their items but leaves the cursor, the last run and the last
+success where they were, and needs no summarizer when nothing is ready (see [`jezero
+run`](cli.md#jezero-run)). [`jezero connector reset`](cli.md#jezero-connector-reset)
+forgets the cursor, so the next run reads the whole source again; unchanged units are
+skipped by their hash.
 
 ### Projects
 
@@ -119,7 +129,8 @@ rules of [`[projects]`](configuration.md#projects), first match wins:
 The result is lowercased, then renamed by `[projects].aliases` merged with the connector's
 `project_aliases` option (the option wins). If no rule matches, the connector's `project`
 key is used, and if that is not set either, the summarizer's guess. `paperclip` uses its
-own `project_map` instead of these rules.
+own `project_map` instead of the folder rules, then renames the result with the same
+aliases.
 
 ### Prompt cleaning
 
@@ -209,7 +220,7 @@ OpenAI Codex CLI sessions. Codex writes one JSON Lines "rollout" per session und
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `sessions_dir` | path or glob | required | Codex's sessions folder, usually `~/.codex/sessions`. A glob (`~/agents/*/codex-home/sessions`) follows several homes, including ones added later. A missing folder fails the run; a glob that matches nothing does not. |
+| `sessions_dir` | path or glob | required | Codex's sessions folder, usually `~/.codex/sessions`. A glob (`~/agents/*/codex-home/sessions`) follows several homes, including ones added later. A missing folder fails the run. A glob that matches nothing yet does not, but the folder before its first wildcard must exist (`sessions_dir folder not found: /home/me/agents`). |
 | `session_index` | path | `<sessions_dir>/../session_index.jsonl` | Where session titles are read from. |
 | `settle_minutes` | number | `30` | Wait until a file has not changed for this long. |
 | `include_subagents` | boolean | `false` | Also read sessions whose `session_meta.source` marks a sub-agent. |
@@ -259,7 +270,7 @@ read) or from the session exports the OpenCode plugin uploads from another compu
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `db_path` | path | `~/.local/share/opencode/opencode.db` | OpenCode's database. Missing file: the run fails. |
-| `export_dir` | path | none | Read `*.json` exports in this folder instead of the database. A missing folder reads nothing. |
+| `export_dir` | path | none | Read `*.json` exports in this folder instead of the database. Missing folder: the run fails. |
 | `settle_minutes` | number | `30` | Wait until a session has not changed for this long. |
 | `include_subagents` | boolean | `false` | Also read sessions that have a parent session. |
 | `include_tool_calls` | boolean | `true` | One line per tool call. |
@@ -308,14 +319,15 @@ exports the Hermes plugin uploads from another computer. Set exactly one of `sta
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `state_db` | path | none | A Hermes profile's `state.db`. Missing file: the run fails. |
-| `export_dir` | path | none | Read `<session>.json` exports in this folder. A missing folder reads nothing. |
+| `export_dir` | path | none | Read `<session>.json` exports in this folder. Missing folder: the run fails. |
 | `skip_session_sources` | list of string | `["cron", "subagent"]` | Session sources (channels) to skip. |
 | `settle_minutes` | number | `30` | Wait until a session has been quiet for this long. |
 | `include_tool_calls` | boolean | `true` | One line per tool call. |
 | `max_tool_args_chars` | integer | `200` | Tool call arguments are cut here, with `...`. |
+| `min_chars` | integer | `400` | Skip sessions whose kept dialogue is shorter, such as a lone greeting. |
 | `project_aliases` | table of string | `{}` | Rename detected projects, on top of `[projects].aliases`. |
 
-`hermes` has no `min_chars`: every session with at least one kept message is summarised.
+With `--sample N`, sessions skipped by `min_chars` do not count towards N.
 The export format is described in [the client reference](client.md#hermes-exports).
 
 | Item field | Value |
@@ -373,7 +385,9 @@ An uploaded transcript is `<conversation id>/transcript.jsonl`, Antigravity's JS
 | `user_prompt_markers` | list of regex | `[]` | See [Prompt cleaning](#prompt-cleaning). |
 | `user_prompt_drop_lines` | list of regex | `[]` | See [Prompt cleaning](#prompt-cleaning). |
 
-A missing `conversations` folder (or `transcripts_dir`) fails the run. When nothing can be
+A missing `data_dir` (`data_dir folder not found: PATH`), a `data_dir` without a
+`conversations` folder (`data_dir has no conversations folder: PATH`) or a missing
+`transcripts_dir` fails the run. When nothing can be
 read from a conversation that has steps, the run reports `format check: nothing readable in
 N conversation(s) with steps (...); the Antigravity format may have changed`: the
 connector shows as failing in `jezero health` and its cursor stays, until the reader is
@@ -421,6 +435,7 @@ sends `GET` requests, with the key in `Authorization: Bearer ***`.
 | `skip_system_notices` | boolean | `true` | Drop comments presented as system notices. |
 | `skip_statuses` | list of string | `[]` | Issue statuses to skip. |
 | `project_map` | table of string | `{}` | Paperclip project name → Jezero project. |
+| `project_aliases` | table of string | `{}` | Rename the mapped projects, on top of `[projects].aliases` (matched case-insensitively). |
 | `board_name` | string | `"board"` | Name shown for comments written by people. |
 | `max_block_chars` | integer | `8000` | A description, comment, interaction or document is shortened in the middle to this length. |
 | `min_chars` | integer | `200` | Skip issues whose rendered text is shorter. |
@@ -436,7 +451,7 @@ seconds.
 | `external_id` | `<identifier>#<n>`: `0` for the segment that starts with the header, else the position of its first entry |
 | `original_ref` | `paperclip-issue:<identifier>` |
 | `occurred_at` | the latest time among the segment's entries |
-| `project` | `project_map[<project name>]`, else the connector's `project`, else the summarizer's guess |
+| `project` | `project_map[<project name>]`, renamed by the aliases, else the connector's `project`, else the summarizer's guess |
 
 ```toml
 [[connectors]]
@@ -457,15 +472,18 @@ loaded with [`jezero import-jsonl`](cli.md#jezero-import-jsonl), which takes the
 with `--source`; no `[[connectors]]` block is needed. The record shape is in
 [Data model](data-model.md#json-lines-import).
 
-> [!WARNING]
-> `jsonl` cannot run on a schedule. An enabled `[[connectors]]` block of this type fails on
-> every `jezero run` and shows as `never` in `jezero health`. Leave it out, or set
-> `enabled = false`.
+`jsonl` cannot run on a schedule, so a `[[connectors]]` block of this type, enabled or
+not, stops the configuration from loading:
+
+```text
+Value error, connector 'notes': jsonl is import-only: use `jezero import-jsonl` instead of a [[connectors]] entry
+```
 
 ## gmail
 
 Planned: Gmail threads through the API with the `gmail.readonly` scope. Mail is written by
-third parties, so give its block `trust = "external"`. Nothing reads it yet: `jezero run`
+third parties, so its items get `trust = "external"` unless the block says otherwise.
+Nothing reads it yet: `jezero run`
 reports it as `"skipped": "not implemented yet"` and `jezero health` ignores it. Its
 options are not defined until it is implemented.
 

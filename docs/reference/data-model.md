@@ -18,8 +18,8 @@ thread, summarised. The app calls items *memories*.
 | `ingested_at` | datetime | no | When it was last inserted or updated, in UTC. |
 | `title` | string | yes | Specific, written by the summarizer, at most 200 characters. |
 | `summary` | string | yes | Two to five sentences: the goal, what was done, how it ended. |
-| `questions` | list of string | yes | Questions someone would ask later to find it (at most 8). |
-| `atoms` | list of [atoms](#atoms) | yes | Exact, reusable facts (at most 16). |
+| `questions` | list of string | yes | Questions someone would ask later to find it (at most 6; extra ones are dropped). |
+| `atoms` | list of [atoms](#atoms) | yes | Exact, reusable facts (at most 12; extra ones are dropped). |
 | `project` | string or null | yes | What it is about (see [Projects](#projects)). |
 | `account` | string or null | yes | The account it belongs to. Set only by `import-jsonl` for now. |
 | `original` | string or null | `get_item` with `include_original` | The redacted text the summary was written from (see [The original](#the-original)). |
@@ -155,8 +155,15 @@ All the segments of one session share its `original_ref`.
 
 When a connector delivers a unit again, its text is compared by `content_hash`. The
 same hash is skipped; a different one updates the item in place, with the same `id`, a
-new summary and a new `ingested_at`. Items are never deleted by a run: a segment that a
-source stops producing stays in the library.
+new summary and a new `ingested_at`.
+
+A run deletes items in one case only. When a connector reads a session again whole and
+it now splits into other segments (after a change to `[summarizer].max_input_chars`, or
+because the session got shorter), the stored segments of that session whose
+`external_id` is no longer produced are removed, and the run report counts them in
+`pruned`. If any segment of the session fails to summarise, its old items stay until a
+run succeeds. A session, issue or conversation that a source stops producing altogether
+stays in the library.
 
 ## Dates
 

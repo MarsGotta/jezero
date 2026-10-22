@@ -28,8 +28,10 @@ python3 ~/.jezero-src/jezero-client/jezero_client.py status
 You should see:
 
 ```text
+key: /home/me/.jezero
 server https://YOUR-JEZERO: HTTP 200 {"ok":true,"device":"laptop","version":"..."}
 queued sessions: 0
+rejected uploads: 0
 ```
 
 A [read-only computer](devices.md#read-only-or-uploading) shows
@@ -42,15 +44,18 @@ differ in what their agent lets a plugin do.
 
 | Agent | Tools | At session start | On the first prompt | Upload | Skill | Older sessions |
 |---|---|---|---|---|---|---|
-| Claude Code | MCP server, registered by `setup` | protocol and recent work | related past work | at each stop and at session end | `jezero` | `backfill` |
-| Codex | MCP server, registered by `setup` | protocol and recent work | related past work | at each stop and at session end | `jezero` | `backfill` |
+| Claude Code | MCP server through the local bridge, brought by the plugin | protocol and recent work | related past work | at each stop and at session end | `jezero` | `backfill` |
+| Codex | MCP server through the local bridge, registered by `setup` | protocol and recent work | related past work | at each stop and at session end | `jezero` | `backfill` |
 | OpenCode | MCP server, registered by the plugin | protocol and recent work, in the system prompt | related past work, in the system prompt | when the session goes idle | `jezero` | none |
-| Hermes Agent | `jezero_*` tools | nothing | recent work and related past work, added to the first message | at the end of a turn and when the session closes | `jezero:jezero` | `backfill --agent hermes` |
-| Antigravity | MCP server through a local bridge | protocol and recent work | related past work, before the first model call | when the conversation stops | `jezero` | `backfill --agent antigravity` |
+| Hermes Agent | `jezero_*` tools | nothing | protocol, recent work and related past work, added to the first message | at the end of a turn and when the session closes | `jezero:jezero` | `backfill --agent hermes` |
+| Antigravity | MCP server through the local bridge, brought by the plugin | protocol and recent work | related past work, before the first model call | when the conversation stops | `jezero` | `backfill --agent antigravity` |
 
 - **Tools**: `search`, `get_item`, `later`, `timeline` and `list_sources`. Hermes Agent
   gets the same tools under the names `jezero_search`, `jezero_get_item` and so on. See
   [MCP tools](../reference/mcp-tools.md).
+- **Local bridge**: `jezero_client.py mcp`, a small MCP server on the computer that adds
+  the key to each request. The agent's configuration names the bridge, never the key. See
+  [MCP bridge](../reference/client.md#mcp-bridge).
 - **Protocol**: a short text that tells the agent to search Jezero before non-trivial
   work, to check `later` before relying on a decision, and to cite item ids. Print it with
   `python3 ~/.jezero-src/jezero-client/jezero_client.py protocol`.
@@ -69,13 +74,14 @@ Context hooks wait at most 2.5 seconds for the server (`JEZERO_HOOK_TIMEOUT`). A
 blocks or breaks the agent: errors go to `client.log` in the [client
 home](devices.md#where-the-key-lives).
 
-A plugin installed on a computer without a key stays quiet: the tools are missing or
-answer that Jezero is not connected, and nothing is uploaded.
+A plugin installed on a computer without a key stays quiet: the hooks print nothing, the
+tools are missing or answer that Jezero is not connected, and nothing is uploaded.
 
 ## Claude Code
 
-The plugin brings the hooks and the skill. The MCP server is registered separately, by
-the client core.
+The plugin brings everything: the hooks, the skill and the MCP server, which is the local
+bridge (`python3 ${CLAUDE_PLUGIN_ROOT}/core/jezero_client.py mcp --agent claude-code`), so
+Claude Code's configuration never holds the key.
 
 1. Install the plugin:
 
@@ -87,42 +93,59 @@ the client core.
    You can also run `/plugin` inside Claude Code. To install from your server's bundle
    instead of GitHub, use `claude plugin marketplace add ~/.jezero-src/jezero-client`.
 
-2. Register the MCP server:
+2. If this computer used an older Jezero client, remove the MCP entry it registered,
+   which holds the key in clear:
 
    ```bash
    python3 ~/.jezero-src/jezero-client/jezero_client.py setup --agent claude-code
    ```
 
-   You should see:
+   You should see one of:
 
    ```text
-   claude: MCP registered
+   claude: the Jezero plugin brings the MCP server; nothing to register; removed the user-scope jezero entry (the plugin's own server replaces it)
+   claude: the Jezero plugin brings the MCP server; nothing to register
    ```
 
-   It runs `claude mcp add --scope user --transport http jezero https://YOUR-JEZERO/mcp`
-   with the header `Authorization: Bearer ***`, so Claude Code's user configuration holds a
-   copy of the key. Run it with the same `CLAUDE_CONFIG_DIR` as the agent, if you set one.
+   Run it with the same `CLAUDE_CONFIG_DIR` as the agent, if you set one.
 
 3. Restart Claude Code.
 
+To give Claude Code the tools without the plugin (no hooks, no upload), run the same
+`setup` command without the plugin installed. It copies the core to the client home and
+registers the bridge at user scope:
+
+```text
+claude: MCP server jezero registered (stdio bridge; the key stays in /home/me/.jezero)
+```
+
 For `claude -p` and other runs where nobody can answer a permission prompt, allow the
 Jezero tools in `~/.claude/settings.json` (or in `settings.json` inside
-`CLAUDE_CONFIG_DIR`):
+`CLAUDE_CONFIG_DIR`). The plugin's tools are named `mcp__plugin_jezero_jezero__search` and
+so on; those of a server registered by `setup`, `mcp__jezero__search`:
 
 ```json
 {
   "permissions": {
-    "allow": ["mcp__jezero"]
+    "allow": ["mcp__plugin_jezero_jezero", "mcp__jezero"]
   }
 }
 ```
 
-For a single run, `claude -p --allowedTools mcp__jezero "..."` does the same.
+For a single run, `claude -p --allowedTools mcp__plugin_jezero_jezero "..."` does the
+same.
 
 **Check it works.** `claude plugin list` shows `jezero@jezero` as enabled, and
-`claude mcp list` shows `jezero` as connected. Start Claude Code in a project folder and
-ask about something you worked on before, without naming Jezero. The agent should call
-`search`, then `later`, and cite item ids like `[123]`.
+`claude mcp list` shows the plugin's server as connected:
+
+```text
+plugin:jezero:jezero: python3 /home/me/.claude/plugins/.../core/jezero_client.py mcp --agent claude-code - ✔ Connected
+```
+
+A line `jezero: https://YOUR-JEZERO/mcp (HTTP)` next to it is the old entry: run step 2.
+Start Claude Code in a project folder and ask about something you worked on before,
+without naming Jezero. The agent should call `search`, then `later`, and cite item ids
+like `[123]`.
 
 **Update.** Claude Code caches plugins by version:
 
@@ -137,13 +160,15 @@ Restart Claude Code to load the new version.
 
 ```bash
 claude plugin uninstall jezero@jezero
-claude mcp remove jezero --scope user
 ```
+
+If `setup` registered the bridge without the plugin, also run
+`claude mcp remove jezero --scope user`.
 
 ## Codex
 
-Like Claude Code: the plugin brings the hooks and the skill, and `setup` registers the
-MCP server.
+The plugin brings the hooks and the skill, and `setup` registers the MCP server: the
+local bridge, so Codex's `config.toml` never holds the key.
 
 1. Install the plugin:
 
@@ -164,17 +189,23 @@ MCP server.
    You should see:
 
    ```text
-   codex: MCP added to config.toml
+   codex: MCP server jezero added to config.toml (stdio bridge; key in /home/me/.jezero)
    ```
 
-   It appends this block to `config.toml` in `CODEX_HOME` (default `~/.codex`), with the
-   key in the header:
+   It adds this block to `config.toml` in `CODEX_HOME` (default `~/.codex`) and leaves
+   the rest of the file as it was:
 
    ```toml
    [mcp_servers.jezero]
-   url = "https://YOUR-JEZERO/mcp"
-   http_headers = { Authorization = "Bearer ***" }
+   command = "python3"
+   args = ["/home/me/.jezero/core/jezero_client.py", "mcp", "--agent", "codex"]
    ```
+
+   With the key outside `~/.jezero`, the block also gets
+   `env = { JEZERO_CLIENT_HOME = "..." }`. An old block with `url` and `http_headers`,
+   written by an older client with the key in clear, is replaced:
+   `codex: replaced the old jezero entry in config.toml (it held the key in clear) with
+   the stdio bridge`.
 
 3. Trust the hooks: open Codex, run `/hooks` and trust the Jezero hooks. Codex does not
    run a plugin's hooks until you do, so until then there is no context and no upload.
@@ -226,9 +257,10 @@ edited.
 
 2. Restart OpenCode.
 
-The plugin adds a remote MCP server named `jezero` with the key in its header, read from
-the key file each time OpenCode starts. If your configuration already has an `mcp.jezero`
-entry, the plugin leaves it alone.
+The plugin adds a remote MCP server named `jezero` at the URL in `client.json` plus its
+`mcp_path` (`/mcp` by default), with the key in its header, read from the key file each
+time OpenCode starts. The key stays in OpenCode's memory, not in its configuration files.
+If your configuration already has an `mcp.jezero` entry, the plugin leaves it alone.
 
 **Check it works.** Start OpenCode in a project folder and ask which Jezero sources it
 can read: it should call `list_sources` on the `jezero` server. If the key was missing
@@ -258,9 +290,9 @@ The Hermes plugin brings its own tools and calls the server with this computer's
 
 The `jezero_*` tools appear only once Hermes finds a key: in `~/.jezero`, or in the
 folder named by `JEZERO_CLIENT_HOME` in the environment Hermes runs in. On the first turn
-of a session the plugin adds recent work and related past work to your message (Hermes
-keeps the system prompt unchanged). Scheduled jobs and subagent sessions are never
-uploaded.
+of a session the plugin adds the protocol (once per session), recent work and related
+past work to your message (Hermes keeps the system prompt unchanged). Scheduled jobs and
+subagent sessions are never uploaded.
 
 **Check it works.** `hermes plugins list` shows `jezero` as enabled. Ask "which Jezero
 sources can you read?": the agent should call `jezero_list_sources`.
@@ -317,9 +349,9 @@ The Antigravity plugin brings the MCP server, the hooks and the skill.
    }
    ```
 
-The MCP server is a local bridge, `jezero_client.py mcp --agent antigravity`, that adds
-the key to each request, so the key never sits in Antigravity's configuration. The bridge
-and the hooks use `~/.gemini/config/jezero` when it holds a key, for sandboxes that see
+The MCP server is the local bridge, `jezero_client.py mcp --agent antigravity`, so the key
+never sits in Antigravity's configuration. The bridge, the hooks and the background
+upload use `~/.gemini/config/jezero` when it holds a key, for sandboxes that see
 `~/.gemini` but not your home (see [Agents in a sandbox](devices.md#agents-in-a-sandbox)).
 
 **Check it works.**
@@ -353,17 +385,39 @@ agy plugin uninstall jezero
 
 ## Any other MCP client
 
-Any client that speaks MCP over Streamable HTTP can read Jezero. It gets the tools only:
-no hooks, no upload.
+Any MCP client can read Jezero. It gets the tools only: no hooks, no upload.
 
-1. Give it a key of its own, so you can limit and revoke it separately. On the server:
+**With the local bridge.** A client that runs local (stdio) servers can use the bridge
+with this computer's key, so its configuration holds no key:
+
+```json
+{
+  "mcpServers": {
+    "jezero": {
+      "command": "python3",
+      "args": ["/home/me/.jezero-src/jezero-client/jezero_client.py", "mcp"]
+    }
+  }
+}
+```
+
+**Over HTTP, with a key of its own.** A client that only speaks MCP over Streamable HTTP,
+or that runs on a computer without the client core, needs its own key in its
+configuration:
+
+> [!WARNING]
+> This stores the key in the client's configuration file, in clear. Use the bridge when
+> the client supports it, give the key only the sources it needs, and revoke it with
+> [`jezero device revoke`](devices.md#revoke-a-computer) when the client goes away.
+
+1. Make the key, on the server:
 
    ```bash
    jezero new-token
    ```
 
-   Hand the token to the client and add a client block with the digest, then restart the
-   server:
+   Hand the token to the client and add a client block with the digest. The server picks
+   it up within a second:
 
    ```toml
    [[clients]]
@@ -390,24 +444,10 @@ no hooks, no upload.
    }
    ```
 
-3. Add the protocol to the client's instructions, so it uses Jezero by habit:
+Either way, add the protocol to the client's instructions, so it uses Jezero by habit:
 
-   ```bash
-   python3 ~/.jezero-src/jezero-client/jezero_client.py protocol
-   ```
-
-A client that only runs local (stdio) servers, or whose configuration you want to keep
-free of keys, can use the bridge with this computer's key:
-
-```json
-{
-  "mcpServers": {
-    "jezero": {
-      "command": "python3",
-      "args": ["/home/me/.jezero-src/jezero-client/jezero_client.py", "mcp"]
-    }
-  }
-}
+```bash
+python3 ~/.jezero-src/jezero-client/jezero_client.py protocol
 ```
 
 ## Use the app
@@ -418,12 +458,13 @@ The [Jezero app](app.md) shows the agents on this computer and the Jezero versio
 jezero agents
 ```
 
-Its Agents view (`4`) has an install or update button per agent, and shows the command
-before running it. For Hermes Agent and Antigravity the button runs the plugin's install
-command from this page. For Claude Code, Codex and OpenCode it runs
-`jezero_client.py setup --agent NAME`, which registers the MCP server only: install the
-Claude Code and Codex plugins with their own commands, and OpenCode with
-`--opencode-plugin` as shown above.
+Its Agents view (`4`) has an install or update button per agent, and shows the commands
+before running them: the ones on this page. For Claude Code and Codex, installing adds
+the marketplace, installs the plugin and runs `setup`; updating updates the marketplace
+and the plugin. For OpenCode it runs `setup --opencode-plugin`, and for Hermes Agent and
+Antigravity the plugin's install command. The view also says how each agent reaches the
+MCP server: `MCP via plugin`, `MCP server registered`, or `old MCP entry with the key in
+clear: run setup` when an older client left the key in the agent's configuration.
 
 ## Next steps
 

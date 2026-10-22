@@ -32,7 +32,7 @@ Guides for a goal you already have.
 
 - [Connect an agent](how-to/connect-agents.md): Claude Code, Codex, OpenCode, Hermes Agent,
   Antigravity, or any MCP client.
-- [Manage computers and keys](how-to/devices.md): add, limit, rotate and remove keys.
+- [Manage computers and keys](how-to/devices.md): add, list, limit, rotate and revoke keys.
 - [Use the Jezero app](how-to/app.md): look, search and update plugins from a terminal.
 - [Troubleshooting](how-to/troubleshooting.md): symptoms, causes and fixes.
 

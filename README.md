@@ -99,7 +99,8 @@ from this repository:
 
 ```bash
 claude plugin marketplace add MarsGotta/jezero && claude plugin install jezero@jezero
-codex plugin marketplace add MarsGotta/jezero    # then install Jezero from /plugins
+codex plugin marketplace add MarsGotta/jezero && codex plugin add jezero@jezero
+python3 ~/.jezero-src/jezero-client/jezero_client.py setup --agent codex   # Codex's MCP
 hermes plugins install MarsGotta/jezero/plugins/hermes --enable
 agy plugin install https://github.com/MarsGotta/jezero/tree/main/plugins/antigravity
 ```

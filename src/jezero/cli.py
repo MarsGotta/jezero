@@ -347,8 +347,13 @@ def cmd_device_approve(config: Config, args: argparse.Namespace) -> int:
         "hermes": ("hermes", "export_dir", inbox / "hermes" / "sessions"),
         "antigravity": ("antigravity", "transcripts_dir", inbox / "antigravity" / "brain"),
     }
+    existing = {c.name for c in config.connectors}
+    kept: list[str] = []
     for agent, (ctype, option, folder) in ({} if args.read_only else stores).items():
         folder.mkdir(parents=True, exist_ok=True)
+        if f"{prefix}-{agent}-{name}" in existing:
+            kept.append(f"{prefix}-{agent}-{name}")  # left by `device revoke`, cursor intact
+            continue
         block += [
             "",
             "[[connectors]]",
@@ -360,9 +365,16 @@ def cmd_device_approve(config: Config, args: argparse.Namespace) -> int:
             "[connectors.options]",
             f'{option} = "{folder}"',
         ]
-    with config.source_file.open("a", encoding="utf-8") as handle:
-        handle.write("\n".join(block) + "\n")
-    print(f"approved {name}; the server picks up the new key within a second")
+    try:
+        editor = _config_editor(config)
+        editor.append(block)
+        _, backup = editor.commit()
+    except ConfigEditError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"approved {name}; the server picks up the new key within a second (backup: {backup})")
+    if kept:
+        print(f"kept its existing connectors (with their cursors): {', '.join(kept)}")
     return 0
 
 

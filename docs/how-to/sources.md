@@ -36,7 +36,9 @@ session already stored with the same text is never summarised twice.
 | `paperclip` | Issues of the Paperclip orchestrator, with comments and documents, through its API. |
 
 `jsonl` is not a connector to schedule: load such files with
-[`jezero import-jsonl`](../reference/cli.md#jezero-import-jsonl). `gmail` is planned.
+[`jezero import-jsonl`](../reference/cli.md#jezero-import-jsonl). A `[[connectors]]` block
+of type `jsonl` stops the config from loading (``connector 'notes': jsonl is import-only:
+use `jezero import-jsonl` instead of a [[connectors]] entry``). `gmail` is planned.
 `jezero check-config` marks the types your version does not implement yet. Every option
 of every type is in [Connectors](../reference/connectors.md).
 
@@ -84,23 +86,33 @@ three sessions than on three thousand.
    You should see:
 
    ```json
-   {"connector": "agent-claude-code", "docs": 3, "unchanged": 0, "stored": 0, "failed": 0, "deferred_sessions": 0, "redactions": 3, "input_chars": 3243, "input_tokens": 0, "output_tokens": 0, "dry_run": true, "errors": [], "warnings": []}
+   {"connector": "agent-claude-code", "docs": 3, "unchanged": 0, "stored": 0, "failed": 0, "deferred_sessions": 0, "redactions": 0, "input_chars": 3186, "input_tokens": 0, "output_tokens": 0, "pruned": 0, "dry_run": true, "sample": false, "note": null, "errors": [], "warnings": []}
    ```
 
    `docs` is how many documents the first full run would summarise (a long session gives
    several), `input_chars` how much text the model would read, and `deferred_sessions`
    the sessions changed in the last `settle_minutes` (30 by default), which wait until
    they are quiet. If the numbers are far from what you expect, tighten the filters (each
-   type has its own, such as `skip_cwd_globs` or `min_chars`) and count again.
+   type has its own, such as `skip_cwd_globs` or `min_chars`) and count again. A path
+   option that points nowhere fails here already, with `FileNotFoundError: projects_dir
+   folder not found: PATH`.
 
-4. Summarise a sample. `--sample N` takes the newest N sessions, stores their items and
-   leaves the cursor alone:
+4. Summarise a sample. `--sample N` takes the newest N sessions and stores their items.
+   It is a pilot: the connector's cursor, last run and last success stay as they were, so
+   the schedule and `jezero health` still see a connector that never ran:
 
    ```bash
-   jezero run --connector agent-claude-code --sample 3
+   jezero run --connector agent-claude-code --sample 2
    ```
 
-   You should see `"stored"` above 0 and `"failed": 0`.
+   You should see `"stored"` above 0, `"failed": 0` and `"sample": true`:
+
+   ```json
+   {"connector": "agent-claude-code", "docs": 2, "unchanged": 0, "stored": 2, "failed": 0, "deferred_sessions": 0, "redactions": 0, "input_chars": 2124, "input_tokens": 200, "output_tokens": 100, "pruned": 0, "dry_run": false, "sample": true, "note": null, "errors": [], "warnings": []}
+   ```
+
+   When no session is ready yet, the report says `"note": "nothing to summarise"` (with
+   the number still deferred) and the pilot needs no summarizer at all.
 
 5. Read what it wrote:
 
@@ -117,20 +129,19 @@ three sessions than on three thousand.
    Check that titles are specific, that projects are right (see
    [Projects](#tag-items-with-the-right-project)) and that nothing secret got through.
 
-6. Enable the connector (`enabled = true`) and run it once by hand. This first run reads
-   the whole source, oldest first:
+6. Enable the connector (`enabled = true`). Since the pilot did not count as a run, the
+   next tick of the timer (`jezero run --due`, every 5 minutes) runs it at once. This
+   first run reads the whole source, oldest first, and the sampled sessions come back as
+   `unchanged`, without summarizer calls:
 
-   ```bash
-   jezero run --connector agent-claude-code
+   ```json
+   {"connector": "agent-claude-code", "docs": 3, "unchanged": 2, "stored": 1, "failed": 0, "deferred_sessions": 0, "redactions": 0, "input_chars": 1062, "input_tokens": 100, "output_tokens": 50, "pruned": 0, "dry_run": false, "sample": false, "note": null, "errors": [], "warnings": []}
+   {"due": {"ran": ["agent-claude-code"], "not_due_until": {}}}
    ```
 
-   The sampled sessions come back as `unchanged` and are not summarised again. Run it by
-   hand because the pilot counted as a run: the timer would wait `interval_minutes` before
-   starting it.
-
-   For a large source, go in steps with `--limit N`, which processes the oldest N sessions
-   and moves the cursor; repeat until `docs` reaches 0. If the timer fires during your
-   run, it skips with `{"skipped": "another run is in progress"}`.
+   For a large source, run it by hand in steps instead, with `--limit N`, which processes
+   the oldest N sessions and moves the cursor; repeat until `docs` reaches 0. If the timer
+   fires during your run, it skips with `{"skipped": "another run is in progress"}`.
 
 From then on the timer runs it. [Keep an eye on Jezero](monitor.md) tells you if it stops.
 
@@ -162,8 +173,9 @@ Jezero takes it from the source when it can, which beats the model's guess:
    `summarizer.known_projects`.
 
 `aliases` rename the result, for every connector. The session connectors also accept a
-`project_aliases` option that applies to that connector only, and `paperclip` maps its own
-project names with `project_map`.
+`project_aliases` option that applies to that connector only. `paperclip` maps its own
+project names with `project_map`, and the `[projects]` aliases and its `project_aliases`
+then rename the result, as for the other connectors.
 
 1. Add your rules:
 
@@ -280,8 +292,53 @@ The [summarizer](../explanation/summaries.md) settings live in
 
 > [!NOTE]
 > Set `max_input_chars` before the first backfill. Parts are identified by where they
-> start, so after a change a session that is read again is cut differently, and its old
-> parts stay in the library next to the new ones.
+> start, so after a change a session that is read again is cut differently and its parts
+> are summarised again. Parts that no longer exist are removed (`pruned` in the report).
+> Sessions read before the change keep their old parts until they are read again: see
+> [Read a source again](#read-a-source-again).
+
+## Read a source again
+
+A connector reads only what changed since its cursor. To make it read its whole source
+again, for example after you changed its filters, `[redaction]` or `max_input_chars`, or
+after an update that reads more of a format, forget the cursor:
+
+```bash
+jezero connector reset agent-claude-code --yes
+```
+
+You should see:
+
+```text
+reset agent-claude-code: its next run reads the whole source again. Stored items are kept; units whose redacted text is unchanged are skipped by content hash, without summarizer calls.
+```
+
+Without `--yes` it asks first, and in a script without a terminal it refuses with
+`error: pass --yes to confirm (no terminal to ask)`. A connector that never stored a
+cursor answers `agent-claude-code has no cursor yet: its next run reads everything
+anyway`. It also refuses while a run is in progress.
+
+The next run, by hand or by the timer, then reads everything. What it costs depends on
+what you changed:
+
+- Nothing that changes the text sent to the model: every unit comes back `unchanged`, and
+  the run makes no summarizer calls.
+
+  ```json
+  {"connector": "agent-claude-code", "docs": 3, "unchanged": 3, "stored": 0, "failed": 0, "deferred_sessions": 0, "redactions": 0, "input_chars": 0, "input_tokens": 0, "output_tokens": 0, "pruned": 0, "dry_run": false, "sample": false, "note": "nothing to summarise", "errors": [], "warnings": []}
+  ```
+
+- Redaction rules, filters that change the rendered text, or `max_input_chars`: the
+  units whose text changed are summarised again, one call each. With a new
+  `max_input_chars`, parts that no longer exist are removed:
+
+  ```json
+  {"connector": "agent-claude-code", "docs": 3, "unchanged": 0, "stored": 3, "failed": 0, "deferred_sessions": 0, "redactions": 0, "input_chars": 3186, "input_tokens": 300, "output_tokens": 150, "pruned": 3, "dry_run": false, "sample": false, "note": null, "errors": [], "warnings": []}
+  ```
+
+Run `jezero run --connector NAME --dry-run` after the reset to see `docs` and
+`input_chars` before you pay for it. To only fix projects, use `jezero retag`, which
+calls no model; to change the summaries themselves, `jezero resummarize`.
 
 ## Next steps
 

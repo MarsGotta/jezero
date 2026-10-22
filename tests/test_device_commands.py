@@ -98,7 +98,7 @@ def test_revoke_with_remove_connectors_restores_the_file_byte_for_byte(cfg, caps
     before = cfg.read_text(encoding="utf-8")
     assert run(cfg, "device", "revoke", "laptop", "--remove-connectors") == 0
     assert cfg.read_text(encoding="utf-8") == BASE
-    (backup,) = backups(cfg)
+    backup = backups(cfg)[-1]  # approve made the first one
     assert backup.read_text(encoding="utf-8") == before
     out = capsys.readouterr().out
     assert "revoked laptop" in out and "removed its connectors" in out
@@ -160,13 +160,13 @@ def test_rotate_replaces_only_the_digest(cfg, capsys) -> None:
     assert "the old key stops working within a second" in capsys.readouterr().out
     assert cfg.read_text(encoding="utf-8") == before.replace(digest("old"), digest("new"))
     assert load_config(cfg).clients[1].token_sha256 == digest("new")
-    assert len(backups(cfg)) == 1
+    assert len(backups(cfg)) == 2  # one by approve, one by rotate
 
 
 def test_rotate_refusals_leave_the_file_alone(cfg, capsys) -> None:
     assert run(cfg, "device", "approve", "laptop", digest("l")) == 0
     assert run(cfg, "device", "approve", "desk", digest("d")) == 0
-    before = cfg.read_text(encoding="utf-8")
+    before, made = cfg.read_text(encoding="utf-8"), backups(cfg)
     assert run(cfg, "device", "rotate", "laptop", "nothex") == 2
     assert run(cfg, "device", "rotate", "ghost", digest("n")) == 2
     assert run(cfg, "device", "rotate", "agent", digest("n")) == 1  # token_env client
@@ -174,7 +174,7 @@ def test_rotate_refusals_leave_the_file_alone(cfg, capsys) -> None:
     # The desk's key: validation refuses two clients with one key, nothing is written.
     assert run(cfg, "device", "rotate", "laptop", digest("d")) == 1
     assert "share the same token_sha256" in capsys.readouterr().err
-    assert cfg.read_text(encoding="utf-8") == before and backups(cfg) == []
+    assert cfg.read_text(encoding="utf-8") == before and backups(cfg) == made
     assert not list(cfg.parent.glob(".jezero-edit-*"))
 
 
@@ -299,3 +299,17 @@ def test_reset_rereads_but_unchanged_units_cost_nothing(tmp_path, monkeypatch) -
     report = asyncio.run(run_connector(config, store, conn, summarizer=again))
     assert (report.docs, report.unchanged, again.calls) == (2, 1, 1)
     assert len(store.timeline(limit=10)) == 2
+
+
+def test_approve_backs_up_and_reuses_the_connectors_revoke_kept(cfg, capsys) -> None:
+    assert run(cfg, "device", "approve", "laptop", digest("one")) == 0
+    assert len(backups(cfg)) == 1  # approve backs up like every other edit
+    assert run(cfg, "device", "revoke", "laptop") == 0
+    capsys.readouterr()
+    assert run(cfg, "device", "approve", "laptop", digest("two")) == 0
+    out = capsys.readouterr().out
+    assert "kept its existing connectors" in out
+    config = load_config(cfg)  # still loads: no duplicate connector names
+    names = [c.name for c in config.connectors]
+    assert len(names) == len(set(names))
+    assert [c.name for c in config.clients] == ["agent", "laptop"]

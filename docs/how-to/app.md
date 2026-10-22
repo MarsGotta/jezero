@@ -71,7 +71,10 @@ questions it answers.
 
 Press `l` on an item to check whether a later session changed it. It runs the same
 [`later`](../reference/mcp-tools.md) call agents are told to make before relying on a
-decision, and lists the newer items, or confirms that this is the latest word.
+decision, and lists the newer items, or confirms that this is the latest word. Under
+**NEWER ON THIS SUBJECT** they match the item's subject; under **NEWER IN THIS PROJECT (by
+date, not by subject)** nothing later matched it, and these are only the project's newer
+items, which may be unrelated.
 
 <p align="center">
   <img src="../app/search.svg" width="100%"
@@ -90,8 +93,10 @@ Pick a project on the left to see what happened in it, day by day, newest first.
 
 One card per agent that Jezero has a plugin for: Claude Code, Codex, OpenCode, Hermes
 Agent and Antigravity. Each card says whether the agent is on this computer, whether Jezero
-is installed in it and in which version, and when that agent last produced an item on any
-computer.
+is installed in it and in which version, how it reaches the MCP server (`MCP via
+plugin`, `MCP server registered`, or `old MCP entry with the key in clear: run setup`),
+and when that agent last produced an item on any computer, the server's own sources
+included.
 
 - **Install** sets Jezero up in an agent that does not have it.
 - **Update** appears when the installed version is older than this app's.

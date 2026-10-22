@@ -15,7 +15,7 @@ manipulated by what they read, and the sources are spread over several computers
 | An agent manipulated by text it read | it uses Jezero to change or erase memory | the MCP server has no write tool, and its database connections are read-only |
 | An agent that should not see everything | a coding agent reads your mail | per-client source patterns, applied to every tool |
 | Someone on the network | reads or forges requests | a bearer key per client, compared by SHA-256 digest; TLS from a proxy or a private network |
-| A web page in your browser | reaches a server on `127.0.0.1` through DNS rebinding | Host and Origin checks on the MCP endpoint |
+| A web page in your browser | reaches a server on `127.0.0.1` through DNS rebinding | Host and Origin checks on every route |
 | A secret in a session | ends up in the library, in the summariser's input, or in an answer | redaction before anything is summarised, stored or indexed |
 | A leaked config file or database | reveals usable keys | only key digests are stored; secrets are referenced by environment variable name |
 | A device | writes outside its place, or reads beyond its share | upload keys write only into their own inbox folder; reading follows its source patterns |
@@ -50,7 +50,9 @@ itself. Each `[[clients]]` entry has exactly one of:
 On each request the server hashes the presented key and compares the digest with every
 configured digest using a constant-time comparison. A client whose `token_env` variable is
 not set is disabled with a warning; with `require_auth` on and no usable client, the
-server refuses to start.
+server refuses to start. Two clients may not share a key: equal `token_sha256` or
+`token_env` values stop the config from loading, and two variables that happen to hold
+the same key disable both clients, since a key must name exactly one owner.
 
 **Device keys are created on the device.** `jezero_client.py init` (or `jezero connect`)
 generates a random key on the computer that will use it, saves it in a file readable only
@@ -61,11 +63,19 @@ bearer header of each request, so a copy of the server's config or database give
 a usable key.
 
 The same key both reads (MCP, overview) and, if approved for it, uploads. To revoke a
-device, remove its `[[clients]]` entry and restart `jezero serve`; keys do not expire on
-their own. Agents in a sandbox that cannot see your home can hold their own key in their
-config folder, and the Antigravity plugin talks to the server through a local stdio
-bridge (`jezero_client.py mcp`) so that the key never sits in Antigravity's MCP config.
-See [Manage devices](../how-to/devices.md).
+device, run `jezero device revoke NAME`; to replace its key, `jezero device rotate NAME
+SHA256`. The server reads `[[clients]]` again within a second of a change, so a revoked
+key stops working on every route at once, without a restart. Keys do not expire on their
+own.
+
+On the computer, the key stays in its file. The agents reach the server through a local
+stdio bridge (`jezero_client.py mcp`) that reads the key file and adds the header to each
+request: the Claude Code and Antigravity plugins ship it as their MCP server, and
+`jezero_client.py setup` registers it in Claude Code and Codex, replacing the HTTP entries
+with the key in clear that older clients wrote. So no agent's configuration file holds the
+key; only OpenCode's plugin hands it to OpenCode, in memory. Agents in a sandbox that
+cannot see your home can hold their own key in their config folder. See [Manage
+computers and keys](../how-to/devices.md).
 
 ## Each client sees only its sources
 
@@ -101,9 +111,11 @@ write path has its own, narrower rules:
 - `<agent>` must be one of the known agents, and the path must match the layout of that
   agent's own store (for example `projects/<slug>/<id>.jsonl` for Claude Code). `..` is
   refused, and the resolved path must stay inside the device's folder.
-- The size limit, `inbox.max_mb` (64 MB), applies after decompression; gzip is
-  decompressed in chunks and stops at the limit. Only identity and gzip encodings are
-  accepted.
+- The size limit, `inbox.max_mb` (64 MB), applies to what arrives and again after
+  decompression. A body without `Content-Length` (chunked) is read in pieces and refused
+  as soon as it passes the limit, so it never sits whole in memory; gzip and zstd are
+  decompressed in chunks and stop at the limit. Only identity, gzip and zstd encodings
+  are accepted.
 - Writes are atomic (a temporary file and a rename). The project header is checked
   against a strict pattern before it is stored next to the file.
 
@@ -179,18 +191,22 @@ its own domain resolve to `127.0.0.1` (DNS rebinding) and then talks to the loca
 if it were its own site. The defence is to refuse requests whose `Host` header (and
 `Origin`, when a browser sends one) is not a name the server expects.
 
-Jezero turns on the MCP SDK's DNS-rebinding protection for the MCP endpoint:
+Jezero turns on the MCP SDK's DNS-rebinding protection and applies the same check to
+every route: MCP, the inbox, the overview endpoint and the bundle. The list is always
+explicit, never left to the SDK's defaults, which cover only `127.0.0.1`, `localhost`
+and `[::1]` and would leave another loopback address (`127.0.0.2`) or a wildcard bind
+unchecked:
 
-- With a loopback host and neither `public_url` nor `allowed_hosts` set, the SDK's
-  loopback defaults apply: `127.0.0.1`, `localhost` and `[::1]` on any port.
-- Otherwise the allowed hosts are `allowed_hosts`, the host of `public_url` (with and
-  without a port), the loopback names and `server.host`; the allowed origins are the origin
-  of `public_url` plus `http://127.0.0.1` and `http://localhost` on any port.
+- The allowed hosts are `allowed_hosts`, the host of `public_url` (with and without a
+  port), `127.0.0.1`, `localhost`, `[::1]` and `server.host`, the last four on any port.
+- The allowed origins are the origin of `public_url`, plus `http://127.0.0.1`,
+  `http://localhost`, `http://[::1]` and `http://` with `server.host`, on any port.
 
+An unknown host gets status 421 and an unknown origin 403, before the key is looked at.
 So behind a proxy, `public_url` is what makes the public name acceptable; reaching the
-server by any other name is refused. The checks belong to the MCP transport. The inbox,
-the overview endpoint and the bundle are plain routes that rely on the bearer key instead
-(the bundle needs none; see below).
+server by any other name is refused. A server bound to `0.0.0.0` accepts only the names
+and addresses you list: a computer that reaches it by a LAN address missing from
+`allowed_hosts` is refused on every route, uploads included.
 
 ## Content written by others
 
@@ -267,7 +283,7 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md).
   inbox (raw transcripts) and the `.env` file are plain files. There is no encryption at
   rest; anyone who can read them as your user or as root reads everything.
 - **A leaked client key.** Its holder reads whatever the key's patterns allow, until the
-  entry is removed and the server restarted. There is no expiry, rate limit or query log.
+  key is revoked or rotated. There is no expiry, rate limit or query log.
 - **A device that lies.** An upload key can write any file that fits its agents' layouts
   into its own folder, and those sessions become items with `own` trust. Source names show
   which device an item came from, and new devices start with disabled connectors, but

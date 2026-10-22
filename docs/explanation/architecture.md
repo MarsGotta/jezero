@@ -199,9 +199,10 @@ costs you some memory, never a broken agent or a corrupt library.
 **Hooks never break agents.** Every hook runs inside a catch-all: an exception is written
 to `~/.jezero/client.log` and the hook prints nothing. Network calls from hooks time out
 after 2.5 seconds (`JEZERO_HOOK_TIMEOUT`). Uploads happen in a detached process, so a slow
-or unreachable server never delays an agent's turn. A server that refuses a file for good
-(400, 403, 413 or 415) gets it dropped from the queue; any other failure keeps the queue
-and stops the flush until next time.
+or unreachable server never delays an agent's turn. A file the server rejects for good
+(400, 413 or 415) is recorded as rejected and leaves the queue, and `status` lists it. A
+refused key (401 or 403), like any other failure, keeps the whole queue and stops the
+flush until next time, so nothing is lost while a key waits for approval.
 
 **Connectors keep cursors.** Each connector stores an opaque cursor (for file-based
 sources, the newest modification time it fully processed). The pipeline advances it only

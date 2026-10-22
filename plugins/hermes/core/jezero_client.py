@@ -44,7 +44,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 AGENT_HOME_VARS = ("CLAUDE_CONFIG_DIR", "CODEX_HOME")
 AGENT_HOME_VAR = {"claude-code": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}
 
@@ -735,8 +735,9 @@ def flush(cfg: dict[str, Any]) -> dict[str, int]:
         before = state.get("refused")
         if refused and not (isinstance(before, dict) and before.get("reason") == refused):
             log(
-                f"uploads refused by the server ({refused}): the queue stays until the key "
-                "is approved for uploads (jezero device approve, without --read-only)"
+                f"uploads refused by the server ({refused}): the queue stays until the "
+                "server's admin allows this key to upload (upload = true in its "
+                "[[clients]] block, picked up within a second)"
             )
 
         def done(s: dict[str, Any]) -> None:
@@ -939,7 +940,8 @@ def init(
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", device):
         print("device: lowercase letters, digits, - or _", file=sys.stderr)
         return 2
-    if load_config() and not force:
+    previous = load_config() or {}
+    if previous and not force:
         print(f"already set up ({CONFIG}); use --force to make a new key", file=sys.stderr)
         return 1
     path = mcp_path(mcp_path_)
@@ -950,7 +952,13 @@ def init(
             break
     token = secrets.token_urlsafe(32)
     _write_private(TOKEN_FILE, token)
-    config: dict[str, Any] = {"url": url, "device": device}
+    # A new key keeps the other settings of this computer (such as `projects`).
+    config: dict[str, Any] = {
+        k: v
+        for k, v in previous.items()
+        if k not in ("url", "device", "mcp_path", "upload", "token")
+    }
+    config.update(url=url, device=device)
     if path != DEFAULT_MCP_PATH:
         config["mcp_path"] = path
     if not upload:
@@ -963,6 +971,11 @@ def init(
     )
     if not upload:
         print("Read-only: this computer's sessions are not uploaded.")
+    if previous.get("device") == device:
+        print("The server already knows this device: ask the Jezero admin to switch keys with:\n")
+        print(f"  jezero device rotate {device} {digest}\n")
+        print("The old key stops working as soon as that runs.")
+        return 0
     print("Ask the Jezero admin to approve it with:\n")
     flag = "" if upload else " --read-only"
     print(f"  jezero device approve {device} {digest}{flag}\n")

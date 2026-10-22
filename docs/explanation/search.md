@@ -154,7 +154,8 @@ outrank the current one. Recency alone cannot guarantee that, which is why `late
 
 - `search` returns `default_limit` results (10) unless the caller asks for a number; any
   request is capped at `max_limit` (50). `timeline` defaults to 20 and `later` to 5, both
-  capped at `max_limit`.
+  capped at `max_limit`. The rule is the same for every tool: a missing, null, zero or
+  negative `limit` means the default.
 - `source` and `project` are exact matches. A client's allowed sources are glob patterns
   (`agent-*`) expanded, case-sensitively, against the source names in the library.
   Asking for a source the client may not read returns nothing, not an error.
@@ -218,19 +219,21 @@ or number (see [Design decisions](design-decisions.md#later-instead-of-supersedi
 
 ```mermaid
 flowchart TD
-  S["search(query or the item's title)<br/>project = item's project, since = item's date<br/>50 results, recency_weight = 0"] --> F["drop the item itself; keep hits with<br/>relevance >= 0.3 x best relevance"]
+  S["search(query or the item's title)<br/>project = item's project (or its source), since = item's date<br/>50 results, recency_weight = 0"] --> F["drop the item itself; keep hits with<br/>relevance >= 0.3 x best relevance"]
   F --> K["keep the 2 most relevant,<br/>fill the rest with the newest"]
   K --> E{"anything left?"}
   E -- yes --> O["newest first, at most limit (5)<br/>matched_by = subject"]
-  E -- no --> TL["the project's timeline since the item's date<br/>matched_by = project_timeline"]
+  E -- no --> TL["the project's (or source's) timeline since the item's date<br/>matched_by = project_timeline"]
 ```
 
 Step by step (`later_items` in `src/jezero/server.py`):
 
 1. **Search the subject.** The words are the `query` the agent passes, or the item's title
    when there is none. The search is restricted to the item's project and to items that
-   happened at or after the item, among the sources the client may read. It takes 50
-   results by pure relevance (`recency_weight = 0`).
+   happened at or after the item, among the sources the client may read. An item without
+   a project is searched within its own source instead: across every project, any common
+   word of the whole library would count as newer work. It takes 50 results by pure
+   relevance (`recency_weight = 0`).
 2. **Keep fair matches.** Because terms are OR-ed, one common word is enough to match.
    Hits that score less than 30% of the best hit (`LATER_MIN_SHARE = 0.3`) are dropped.
    Without a query the best hit is usually the item itself, so the bar is set by how well
@@ -240,10 +243,12 @@ Step by step (`later_items` in `src/jezero/server.py`):
    hits, because the point is the latest state, not the closest wording.
 4. **Order by date.** The result is sorted newest first and cut to `limit` (5 by
    default), with `matched_by = "subject"`.
-5. **Fall back to the timeline.** If no item passes, `later` returns the project's newer
-   items from its timeline instead, flagged `matched_by = "project_timeline"`. They may
-   be unrelated; the flag tells the agent to read them as context, not as evidence of a
-   change.
+5. **Fall back to the timeline.** If no item passes, `later` returns the project's (or,
+   without a project, the source's) newer items from its timeline instead, flagged
+   `matched_by = "project_timeline"`. They may be unrelated; the flag tells the agent to
+   read them as context, not as evidence of a change. The Jezero app and `jezero show
+   --newer` say so too, with the heading `NEWER IN THIS PROJECT (by date, not by
+   subject)` instead of `NEWER ON THIS SUBJECT`.
 
 Some consequences worth knowing:
 

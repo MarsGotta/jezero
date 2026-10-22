@@ -123,6 +123,11 @@
   (`skip_project_dirs`).
 - The MCP server unit stops within 10 s: clients keep streams open and the default 90 s
   wait made restarts slow.
+- Client 0.5.1: `init --force` keeps this computer's other settings (such as `projects`)
+  and, for a device the server already knows, prints the `jezero device rotate` line to
+  give the admin; the "uploads refused" log line names the real fix.
+- `device approve` backs the config up like the other edits, and approving a name again
+  after `device revoke` reuses the connectors revoke kept instead of adding duplicates.
 - Client 0.5.0:
   - The Claude Code plugin brings its own MCP server (`.mcp.json`, the stdio bridge), and
     `setup --agent claude-code` / `--agent codex` register the stdio bridge instead of

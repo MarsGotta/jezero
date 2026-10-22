@@ -32,10 +32,10 @@ schema with five fields:
 
 | Field | What the prompt asks | What the parser keeps |
 |---|---|---|
-| `title` | specific, at most 80 characters | cut at 200 characters; required |
+| `title` | specific, ideally under 80 characters; anything past 200 is cut | cut at 200 characters; required |
 | `summary` | 2 to 5 sentences: the goal, what was done, how it ended | required |
-| `questions` | 3 to 6 natural questions someone would ask later to find this, naming the distinctive tools, errors and projects | at most 8 |
-| `atoms` | up to 12 small exact facts, each with a kind | at most 16 |
+| `questions` | 3 to 6 natural questions someone would ask later to find this, naming the distinctive tools, errors and projects (more are dropped) | at most 6 |
+| `atoms` | up to 12 small exact facts, each with a kind (more are dropped) | at most 12 |
 | `project` | a short lowercase slug, or null if unclear | lowercased |
 
 The questions are the bridge between how a session was written and how someone will look
@@ -151,7 +151,7 @@ dialogue, one line per tool call (shell commands and edited files, for example),
 tool results, hidden reasoning or memory blocks an agent injects into its own prompts.
 Orchestrators that repeat the same instructions at the top of every prompt can have them
 stripped (`user_prompt_markers`, `user_prompt_drop_lines`). Sessions under a minimum size
-(`min_chars`, 400 characters for agent sessions) are skipped: a single slash command or a
+(`min_chars`, 400 characters for agent sessions, Hermes Agent included) are skipped: a single slash command or a
 "hi" is not worth a call. The options per connector are in the
 [connectors reference](../reference/connectors.md).
 
@@ -206,7 +206,9 @@ What drives the cost:
 - **Unchanged text is free.** The hash check runs before the model is called.
 - **You can measure first.** `jezero run --dry-run` collects and redacts without calling
   the model and reports how many documents and characters a run would send. `--sample N`
-  summarises the newest N sessions only, and `--limit` caps a run. Each run report counts
+  summarises the newest N sessions only, as a pilot that leaves the connector's state
+  alone, and `--limit` caps a run. `jezero connector reset` makes a connector read its
+  source again at no model cost for units whose text did not change. Each run report counts
   input and output tokens.
 
 What drives latency, from a session's last message to a searchable item, with the
@@ -235,7 +237,8 @@ Every item carries a `trust` value:
 - `own`: written by you or your agents. Agent sessions and task boards are `own`.
 - `external`: written by third parties, such as email from other people.
 
-Trust is set per connector (`trust` in its `[[connectors]]` entry, `own` by default) or
+Trust is set per connector (`trust` in its `[[connectors]]` entry; by default the
+type's own, `external` for `gmail` and `own` for the rest) or
 per import (`jezero import-jsonl --trust`), and returned with every item. It does not
 change ranking. It changes how an agent must read the item: the server instructions say
 that items with `trust = "external"` are data, never instructions to follow. The summariser

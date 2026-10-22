@@ -33,7 +33,7 @@ python3 scripts/build_clients.py
 You should see:
 
 ```text
-built /home/me/jezero/dist/client, /home/me/jezero/dist/jezero-client.tar.gz and plugins/ (version 0.4.0)
+built /home/me/jezero/dist/client, /home/me/jezero/dist/jezero-client.tar.gz and plugins/ (version 0.5.1)
 ```
 
 The server offers the file at `/client/jezero-client.tar.gz` without a key: it is the same
@@ -53,7 +53,7 @@ python3 ~/.jezero-src/jezero-client/jezero_client.py --version
 You should see:
 
 ```text
-0.4.0
+0.5.1
 ```
 
 `jezero_client.py` is the [client core](../glossary.md#client-core): one Python file with
@@ -68,7 +68,7 @@ python3 ~/.jezero-src/jezero-client/jezero_client.py init --url https://YOUR-JEZ
 You should see:
 
 ```text
-Device key created in /home/me/.jezero (the key itself never leaves this computer).
+Device key created. The key stays in /home/me/.jezero; the server only keeps its SHA-256 fingerprint.
 Ask the Jezero admin to approve it with:
 
   jezero device approve laptop SHA256
@@ -87,9 +87,15 @@ python3 ~/.jezero-src/jezero-client/jezero_client.py status
 You should see:
 
 ```text
+key: /home/me/.jezero
 server https://YOUR-JEZERO: HTTP 401 {"ok":false,"error":"unknown token"}
 queued sessions: 0
+rejected uploads: 0
 ```
+
+The first line is the folder that holds the key. The 401 is expected: the server does not
+know the key yet. Sessions the laptop tries to upload before the approval wait in its
+queue.
 
 > [!NOTE]
 > A computer whose sessions must not reach Jezero, such as the server itself (its
@@ -110,7 +116,7 @@ uv run jezero device approve laptop SHA256
 You should see:
 
 ```text
-approved laptop; restart the MCP server so it accepts the new key
+approved laptop; the server picks up the new key within a second (backup: /home/me/jezero/jezero.toml.bak-20261022T034500Z)
 ```
 
 The command appended to `jezero.toml` a [client](../glossary.md#client) for the laptop:
@@ -131,13 +137,8 @@ upload = true
 `agent-claude-code-laptop`, `agent-codex-laptop`, `agent-opencode-laptop`,
 `agent-hermes-laptop` and `agent-antigravity-laptop`. They start with `enabled = false`.
 
-The server reads its clients when it starts. Restart it, as a service:
-
-```bash
-systemctl --user restart jezero-serve.service
-```
-
-Or, if it runs in a terminal, stop it with `Ctrl+C` and start `uv run jezero serve` again.
+The running server reads the change by itself: there is nothing to restart. `uv run
+jezero device list` shows the laptop with its connectors.
 
 ## 5. Check the connection (on the laptop)
 
@@ -148,30 +149,15 @@ python3 ~/.jezero-src/jezero-client/jezero_client.py status
 You should see:
 
 ```text
+key: /home/me/.jezero
 server https://YOUR-JEZERO: HTTP 200 {"ok":true,"device":"laptop","version":"0.1.0.dev0"}
 queued sessions: 0
+rejected uploads: 0
 ```
 
 ## 6. Set up Claude Code (on the laptop)
 
-Register the Jezero MCP server in Claude Code, with the laptop's key:
-
-```bash
-python3 ~/.jezero-src/jezero-client/jezero_client.py setup --agent claude-code
-claude mcp list
-```
-
-You should see:
-
-```text
-claude: MCP registered
-Checking MCP server health…
-
-jezero: https://YOUR-JEZERO/mcp (HTTP) - ✔ Connected
-```
-
-`setup` registers the server for your user, in every folder. Then install the plugin, which
-adds the hooks and the `jezero` skill:
+Install the Jezero plugin. It brings the MCP server, the hooks and the `jezero` skill:
 
 ```bash
 claude plugin marketplace add MarsGotta/jezero
@@ -185,6 +171,21 @@ You should see:
 ✔ Successfully added marketplace: jezero (declared in user settings)
 Installing plugin "jezero@jezero"...✔ Successfully installed plugin: jezero@jezero (scope: user)
 ```
+
+Check that Claude Code reaches Jezero:
+
+```bash
+claude mcp list
+```
+
+You should see, among your other servers:
+
+```text
+plugin:jezero:jezero: python3 /home/me/.claude/plugins/.../core/jezero_client.py mcp --agent claude-code - ✔ Connected
+```
+
+The plugin's MCP server is the client core's bridge: it runs on the laptop and adds the
+key from `~/.jezero` to each request, so Claude Code's configuration never holds the key.
 
 The plugin's [hooks](../glossary.md#hook) give every session a short
 [protocol](../glossary.md#protocol) and recent work of its project, add related past work
@@ -246,7 +247,7 @@ summarizer.
    Right after the upload you should see `"deferred_sessions": 1`:
 
    ```json
-   {"connector": "agent-claude-code-laptop", "docs": 0, "unchanged": 0, "stored": 0, "failed": 0, "deferred_sessions": 1, "redactions": 0, "input_chars": 0, "input_tokens": 0, "output_tokens": 0, "dry_run": true, "errors": [], "warnings": []}
+   {"connector": "agent-claude-code-laptop", "docs": 0, "unchanged": 0, "stored": 0, "failed": 0, "deferred_sessions": 1, "redactions": 0, "input_chars": 0, "input_tokens": 0, "output_tokens": 0, "pruned": 0, "dry_run": true, "sample": false, "note": "nothing to summarise (1 still active, deferred)", "errors": [], "warnings": []}
    ```
 
    A connector waits until a session has been quiet for 30 minutes (the option
@@ -255,7 +256,7 @@ summarizer.
    see the session counted as work:
 
    ```json
-   {"connector": "agent-claude-code-laptop", "docs": 1, "unchanged": 0, "stored": 0, "failed": 0, "deferred_sessions": 0, "redactions": 0, "input_chars": 700, "input_tokens": 0, "output_tokens": 0, "dry_run": true, "errors": [], "warnings": []}
+   {"connector": "agent-claude-code-laptop", "docs": 1, "unchanged": 0, "stored": 0, "failed": 0, "deferred_sessions": 0, "redactions": 0, "input_chars": 1208, "input_tokens": 0, "output_tokens": 0, "pruned": 0, "dry_run": true, "sample": false, "note": null, "errors": [], "warnings": []}
    ```
 
    `input_chars` is the size of what would go to the model, after cleaning; yours
@@ -302,14 +303,15 @@ summarizer.
    You should see `"stored": 1`:
 
    ```json
-   {"connector": "agent-claude-code-laptop", "docs": 1, "unchanged": 0, "stored": 1, "failed": 0, "deferred_sessions": 0, "redactions": 0, "input_chars": 700, "input_tokens": ..., "output_tokens": ..., "dry_run": false, "errors": [], "warnings": []}
+   {"connector": "agent-claude-code-laptop", "docs": 1, "unchanged": 0, "stored": 1, "failed": 0, "deferred_sessions": 0, "redactions": 0, "input_chars": 1208, "input_tokens": ..., "output_tokens": ..., "pruned": 0, "dry_run": false, "sample": true, "note": null, "errors": [], "warnings": []}
    ```
 
    Without a summarizer, the run stops with
-   `"error": "SummarizerError: summarizer.model is not set in the config"`.
+   `"error": "SummarizerError: summarizer.model is not set in the config"` as soon as a
+   session is ready to summarise.
 
-4. The pilot does not move the connector's cursor. Turn the connector on so every run
-   reads the laptop's new sessions: in `jezero.toml`, find the `[[connectors]]` block
+4. The pilot (`"sample": true`) changes nothing in the connector's state: no cursor, no
+   last run. Turn the connector on so every run reads the laptop's new sessions: in `jezero.toml`, find the `[[connectors]]` block
    with `name = "agent-claude-code-laptop"` and change its `enabled = false` to
    `enabled = true`. Then run every enabled connector once:
 

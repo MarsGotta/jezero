@@ -8,7 +8,7 @@ travel to the server. For the flags of each command, see
 The core is one Python file (Python 3.9 or newer, standard library only, so it runs with
 the `python3` that ships with macOS). Every plugin carries a copy in its `core/` folder,
 next to `jezero_projects.py`, the project rules it shares with the server. Its version is
-`VERSION` in the file (`0.4.0`). The plugins are thin adapters that map their agent's
+`VERSION` in the file (`0.5.1`). The plugins are thin adapters that map their agent's
 events to the core's [hook events](#hook-events).
 
 Nothing in the core may block or break an agent: every network call has a short timeout,
@@ -20,15 +20,18 @@ detached process.
 The folder that holds this computer's key, queue and state. The core picks the first of:
 
 1. `$JEZERO_CLIENT_HOME`, when set.
-2. For commands run with `--agent antigravity` (`hook`, `mcp`) only:
-   `~/.gemini/config/jezero`, when it holds a `client.json`.
-3. `$CLAUDE_CONFIG_DIR/jezero`, when it holds a `client.json`.
-4. `$CODEX_HOME/jezero`, when it holds a `client.json`.
-5. `~/.jezero`.
+2. For a command run with `--agent` (`hook`, `mcp`, `status`, `flush`, and each agent of
+   `setup` and `backfill`), that agent's own folder, when it holds a `client.json`:
+   `~/.gemini/config/jezero` for `antigravity`, `$CLAUDE_CONFIG_DIR/jezero` for
+   `claude-code`, `$CODEX_HOME/jezero` for `codex`.
+3. `$CLAUDE_CONFIG_DIR/jezero`, then `$CODEX_HOME/jezero`, when it holds a `client.json`.
+4. `~/.jezero`.
 
-Steps 2 to 4 are for agents run in a sandbox that cannot see your home folder: they keep
+Steps 2 and 3 are for agents run in a sandbox that cannot see your home folder: they keep
 their own key inside the agent's config folder. To create one there, run `init` with
-`JEZERO_CLIENT_HOME` pointing at that folder.
+`JEZERO_CLIENT_HOME` pointing at that folder. A background upload started by a hook runs
+with `JEZERO_CLIENT_HOME` set to the hook's home, so it sends the queue of the key that
+queued it.
 
 The OpenCode plugin picks its own home the same way, with
 `$XDG_CONFIG_HOME/opencode/jezero` (default `~/.config/opencode/jezero`) as the agent
@@ -39,15 +42,15 @@ folder, and passes it to the core as `JEZERO_CLIENT_HOME`.
 | Path in the client home | Written by | Content |
 |---|---|---|
 | `client.json` | `init` | The [settings](#clientjson). |
-| `token` | `init` | The key, mode `0600`. It never leaves the computer except in `Authorization` headers. |
+| `token` | `init` | The key, mode `0600`. Sent only in the `Authorization` header of the core's own requests; the server keeps its SHA-256, never the key. |
 | `spool/pending/<agent>__<session>.json` | hooks, `backfill` | One [queued upload](#upload-queue) per session. |
 | `spool/hermes/<session>.json` | Hermes hooks, `backfill --agent hermes` | [Hermes exports](#hermes-exports) waiting to be uploaded. |
 | `spool/opencode/<session>.json` | the OpenCode plugin | OpenCode session exports waiting to be uploaded. |
 | `spool/flush.lock` | `flush` | Held while an upload runs; considered stale after 10 minutes. |
-| `state.json` | hooks, `flush` | What was uploaded, prompted and throttled ([below](#statejson)). |
+| `state.json` | hooks, `flush` | What was uploaded, rejected, prompted and throttled ([below](#statejson)). |
 | `client.log` | everything | One line per error or notable event, with a local timestamp. |
 | `ca.pem` | macOS, on a certificate error | The system's root certificates, exported once (see [TLS](#tls)). |
-| `core/jezero_client.py`, `core/jezero_projects.py` | `setup --agent opencode` | A stable copy of the core for the OpenCode plugin file. |
+| `core/jezero_client.py`, `core/jezero_projects.py` | `setup` | A stable copy of the core: the MCP bridge that `setup` registers in Claude Code and Codex, and the OpenCode plugin file, run it from here. |
 
 ### client.json
 
@@ -65,7 +68,8 @@ folder, and passes it to the core as `JEZERO_CLIENT_HOME`.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `url` | string | required | Server base URL. `init` strips a trailing `/` and `/mcp`. The core always calls `<url>/mcp`, so a server with another `[server].path` does not work with the plugins. |
+| `url` | string | required | Server base URL. `init` strips a trailing `/`, and the MCP path (`--mcp-path`, or `/mcp`) when the URL ends with it. |
+| `mcp_path` | string | `/mcp` | URL path of the MCP endpoint, the server's `[server].path`. Written by `init --mcp-path PATH` only when it is not `/mcp`. The core, the bridge and the OpenCode plugin call `<url><mcp_path>`. |
 | `device` | string | set by `init` | This computer's name, `^[a-z0-9][a-z0-9_-]{0,63}$`, used in the approval command. |
 | `upload` | boolean | `true` | `false` (written by `init --no-upload`) makes a [read-only computer](#read-only-computers). |
 | `projects` | object | none | [Project rules](#projects) for this computer. |
@@ -73,6 +77,12 @@ folder, and passes it to the core as `JEZERO_CLIENT_HOME`.
 The client counts as set up when `client.json` has a `url` and `token` is not empty. The
 `device` value is informational: the server knows the device by the name it was approved
 with.
+
+> [!NOTE]
+> `init --force` makes a new key and rewrites `url`, `device`, `mcp_path` and `upload`
+> from the options you pass (`--no-upload`, `--mcp-path`); other settings such as
+> `projects` are kept. For the same device name it prints the `jezero device rotate` line
+> for the admin instead of `device approve`.
 
 ### Projects
 
@@ -96,10 +106,15 @@ shown at session start.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `uploaded` | object | Path of each uploaded file → `[mtime, size]` when it was sent. An unchanged file is not sent again. |
+| `uploaded` | object | Path of each uploaded file → `[mtime, size]` when it was sent. An unchanged file is not sent again. The newest 2000 are kept. |
+| `rejected` | object | Path of each file the server refused for good (HTTP 400, 413 or 415) → `{agent, mark, reason, at}`. Not sent again until the file changes. The newest 500 are kept. |
+| `refused` | object | `{reason, at}` of the first HTTP 401 or 403 in a row: the server refused the key itself, so the whole queue waits. Cleared by the next upload that succeeds. |
 | `prompted` | object | Session id → time of its first prompt. The newest 500 are kept. |
-| `stop_flush` | object | Session id → time the last `stop` started an upload. |
+| `stop_flush` | object | Session id → time the last `stop` started an upload. The newest 500 are kept. |
 | `last_flush` | number | Time of the last `flush`, in seconds since the epoch. |
+
+Hooks and the uploader write `state.json` at the same time, so each change reads the file
+again, applies itself and saves it.
 
 ## Environment variables
 
@@ -120,11 +135,11 @@ shown at session start.
 | Command | What it does |
 |---|---|
 | [`init`](cli.md#jezero_clientpy-init) | Creates the key and `client.json`, prints `jezero device approve DEVICE SHA256` for the server's admin. Refuses if already set up, unless `--force`. |
-| [`status`](cli.md#jezero_clientpy-status) | Checks the key with the server and shows the queue. Exit 0 when the server accepts the key. |
-| [`setup`](cli.md#jezero_clientpy-setup) | Registers the MCP server in the agents ([below](#setup)). |
+| [`status`](cli.md#jezero_clientpy-status) | Shows the client home, checks the key with the server and shows the queue and the rejected uploads. `--agent NAME` uses that agent's key. Exit 0 when the server accepts the key. |
+| [`setup`](cli.md#jezero_clientpy-setup) | Registers Jezero in the agents ([below](#setup)). |
 | [`mcp`](cli.md#jezero_clientpy-mcp) | Runs the [stdio MCP bridge](#mcp-bridge). |
 | [`hook`](cli.md#jezero_clientpy-hook) | Runs one [hook event](#hook-events), reading the agent's JSON on stdin. Always exits 0. |
-| [`flush`](cli.md#jezero_clientpy-flush) | Uploads the queue now. Prints the counts only on a terminal. |
+| [`flush`](cli.md#jezero_clientpy-flush) | Uploads the queue now and prints the counts. `--agent NAME` uses the queue of that agent's key. |
 | [`backfill`](cli.md#jezero_clientpy-backfill) | Queues sessions already on this computer ([below](#backfill)). |
 | [`protocol`](cli.md#jezero_clientpy-protocol) | Prints the [protocol](#protocol). |
 
@@ -135,7 +150,7 @@ python3 ~/.jezero-src/jezero-client/jezero_client.py init --url https://YOUR-JEZ
 You should see:
 
 ```text
-Device key created in /home/me/.jezero (the key itself never leaves this computer).
+Device key created. The key stays in /home/me/.jezero; the server only keeps its SHA-256 fingerprint.
 Ask the Jezero admin to approve it with:
 
   jezero device approve laptop SHA256
@@ -144,21 +159,48 @@ Ask the Jezero admin to approve it with:
 `status` prints, on a computer that uploads:
 
 ```text
+key: /home/me/.jezero
 server https://YOUR-JEZERO: HTTP 200 {"ok":true,"device":"laptop","version":"0.1.0.dev0"}
 queued sessions: 0
+rejected uploads: 0
 ```
 
-and on a [read-only computer](#read-only-computers), after a `list_sources` call:
+While the server refuses the key (HTTP 401 or 403) and sessions wait, a line says since
+when:
 
 ```text
+key: /home/me/.jezero
+server https://YOUR-JEZERO: HTTP 403 {"ok":false,"error":"this key may not upload"}
+queued sessions: 1
+uploads refused since 2026-10-22 03:32: HTTP 403 {"ok":false,"error":"this key may not upload"} (the queue is kept)
+rejected uploads: 0
+```
+
+Files the server rejected for good are counted, and the five newest are listed with their
+reason:
+
+```text
+key: /home/me/.jezero
+server https://YOUR-JEZERO: HTTP 200 {"ok":true,"device":"laptop","version":"0.1.0.dev0"}
+queued sessions: 0
+rejected uploads: 1
+  2026-10-22 03:35 claude-code: HTTP 413 {"ok":false,"error":"file too large"}
+```
+
+On a [read-only computer](#read-only-computers), after a `list_sources` call:
+
+```text
+key: /home/me/.jezero
 server https://YOUR-JEZERO: read-only, 4 readable sources
 ```
+
+Not set up, `status` exits 1 with ``not set up (/home/me/.jezero): run `init` first``.
 
 ## Hook events
 
 | Event | What the core does |
 |---|---|
-| `session-start` | Prints the [protocol](#protocol). When set up, it also starts a background upload of anything still queued (not on a read-only computer), and adds the project's recent work: a `timeline` call for the project of the session's folder, at most 5 items. Not set up: the protocol only. |
+| `session-start` | Not set up: prints nothing (the agent has no Jezero tools to use). Set up: prints the [protocol](#protocol), starts a background upload of anything still queued (not on a read-only computer), and adds the project's recent work: a `timeline` call for the project of the session's folder, at most 5 items. |
 | `user-prompt` | Only the first prompt of each session. Takes the prompt's distinctive words; with at least two, runs `search` with them (limit 8) and adds up to 3 results in which at least two of the words appear as whole words in the title or summary. |
 | `stop` | Queues the session's transcript and starts a background upload, at most once every 15 minutes per session. |
 | `session-end` | Queues the transcript and starts a background upload, without the throttle. |
@@ -190,7 +232,8 @@ The hook reads these fields of the agent's JSON: `session_id`, `cwd`, `prompt`
 
 | Agent | Agent event | Core event | Notes |
 |---|---|---|---|
-| Claude Code | `SessionStart` (`startup`, `resume`, `clear`, `compact`) | `session-start` | Timeout 10 s. Output becomes context. |
+| Claude Code | plugin's `.mcp.json` | | Starts the [MCP bridge](#mcp-bridge), `python3 ${CLAUDE_PLUGIN_ROOT}/core/jezero_client.py mcp --agent claude-code`, as the MCP server `jezero`. |
+| | `SessionStart` (`startup`, `resume`, `clear`, `compact`) | `session-start` | Timeout 10 s. Output becomes context. |
 | | `UserPromptSubmit` | `user-prompt` | Timeout 10 s. |
 | | `Stop` | `stop` | Asynchronous, timeout 10 s. |
 | | `SessionEnd` | `session-end` | Timeout 5 s. |
@@ -201,8 +244,8 @@ The hook reads these fields of the agent's JSON: `session_id`, `cwd`, `prompt`
 | OpenCode | first `experimental.chat.system.transform` of a session | `session-start` | The text joins the system prompt, every turn of the session. |
 | | first `chat.message` of a session | `user-prompt` | The prompt's text parts; the result also joins the system prompt. |
 | | `session.idle` event | `session-end` | Exports the session through the SDK to `spool/opencode/<id>.json`, then runs the hook detached. |
-| | `config` | | Registers the MCP server `jezero` (`<url>/mcp` with the key) unless one is already configured. |
-| Hermes Agent | `pre_llm_call`, first turn | (core functions) | Recent work and related past work, added to the user's message. |
+| | `config` | | Registers the MCP server `jezero` (`<url><mcp_path>` with the key) unless one is already configured. |
+| Hermes Agent | `pre_llm_call`, first turn | (core functions) | The protocol (once per session), recent work and related past work, added to the user's message. Nothing without a key. |
 | | `on_session_end` | `session-end` | At most every 10 minutes per session, in a background thread. |
 | | `on_session_finalize` | `session-end` | Always. |
 | Antigravity | `SessionStart` | `session-start` | Timeout 15 s. |
@@ -215,11 +258,13 @@ The OpenCode plugin runs `session-start` and `user-prompt` with a 5-second limit
 
 The Hermes plugin imports the core instead of running it. It adds the `jezero_search`,
 `jezero_get_item`, `jezero_later`, `jezero_timeline` and `jezero_list_sources` tools
-(see [MCP tools](mcp-tools.md#in-hermes-agent-and-antigravity)), each with a 20-second
-timeout, and only once the computer is set up. It does not add the protocol: its tool
-descriptions and the `jezero:jezero` skill carry the same advice. The first-turn context
-starts with `Jezero (shared memory of past work; check with jezero_get_item and
-jezero_later before relying on it):`.
+(see [MCP tools](mcp-tools.md#in-hermes-agent-claude-code-codex-and-antigravity)), each
+with a 20-second timeout, and only once the computer is set up. On the first turn of a
+session it adds the [protocol](#protocol), once per session, with the tool names Hermes
+uses (`jezero_search`, `jezero_later`, `jezero_get_item`); a session id that comes back
+after a context compression does not get it twice. Recent and related work follow under
+`Jezero (shared memory of past work; check with jezero_get_item and jezero_later before
+relying on it):`. Without a key it adds nothing.
 
 #### Antigravity
 
@@ -260,19 +305,28 @@ Jezero indexes past sessions of all of this user's agents and their project task
 3. **Flush.** One flush at a time (`spool/flush.lock`). Pointers are taken in name order:
    - an unreadable pointer is deleted;
    - a transcript that no longer exists counts as `gone`;
-   - a transcript with the same modification time and size as when it was last sent counts
-     as `unchanged`;
+   - a transcript with the same modification time and size as when it was last sent, or
+     as when the server last rejected it, counts as `unchanged`;
    - the rest are sent gzip-compressed with
      [`PUT /inbox/v1/<agent>/<path>`](http-api.md#upload-a-session-file) and
      `X-Jezero-Project`, with a 60-second timeout, and count as `sent`.
-4. **Answer.** HTTP 200: sent. HTTP 400, 403, 413 or 415: the server will never accept the
-   file; it is logged and dropped. Any other status or a network error: the flush stops
-   (`failed`) and the queue stays for the next hook.
+4. **Answer.**
+   - HTTP 200: sent.
+   - HTTP 401 or 403: the server refused the key (not approved yet, revoked, or not
+     allowed to upload). The flush stops (`failed`), the whole queue stays, and
+     `client.log` says so once: `uploads refused by the server (...): the queue stays
+     until the server's admin allows this key to upload (upload = true in its
+     [[clients]] block, picked up within a second)`. `status` shows `uploads refused since ...`.
+   - HTTP 400, 413 or 415: the server will never accept this file as it is. It counts as
+     `rejected`, leaves the queue, and is recorded in `state.json`; it is sent again only
+     if the file changes. `status` lists it.
+   - Any other status or a network error: the flush stops (`failed`) and the queue stays
+     for the next hook.
 
-`flush` on a terminal prints the counts:
+`flush` prints the counts:
 
 ```json
-{"sent": 1, "unchanged": 0, "gone": 0, "failed": 0}
+{"sent": 1, "unchanged": 0, "gone": 0, "failed": 0, "rejected": 0}
 ```
 
 | Agent | Transcript accepted | Inbox path |
@@ -309,7 +363,9 @@ unchanged session is not uploaded again.
 ### Backfill
 
 `backfill` queues the sessions changed in the last `--days` (default 90) days, then
-starts an upload.
+starts an upload. Each agent's sessions go to the queue of the key that agent uses (see
+[Client home](#client-home)), so a sandboxed agent's sessions upload under its own device
+name.
 
 | `--agent` | Reads |
 |---|---|
@@ -325,44 +381,60 @@ You should see:
 queued 12 sessions; uploading in the background
 ```
 
+An agent whose key is missing prints ``claude-code: not set up (/home/me/.jezero): run
+`init` first``, and the other agents go on.
+
 ## Read-only computers
 
 `init --no-upload` writes `"upload": false`. Then hooks give context but never queue or
-upload, `backfill` prints `read-only computer (init --no-upload): nothing to upload`, and
-`status` checks the key with `list_sources` instead of the inbox. Use it on the computer
-that runs the server, whose sessions the connectors already read, and approve it on the
-server with `jezero device approve DEVICE SHA256 --read-only`.
+upload, `backfill` prints `claude-code: read-only computer (init --no-upload): nothing to
+upload` for each agent, and `status` checks the key with `list_sources` instead of the
+inbox. Use it on the computer that runs the server, whose sessions the connectors already
+read, and approve it on the server with `jezero device approve DEVICE SHA256 --read-only`.
 
 ## MCP bridge
 
 `jezero_client.py mcp` is a local stdio MCP server that forwards every JSON-RPC line it
-reads to `<url>/mcp` with this computer's key, so the agent's configuration holds no key.
-The Antigravity plugin uses it. It keeps the server's `Mcp-Session-Id`, waits up to 60
-seconds per message, and answers requests (not notifications) with a JSON-RPC error
-`-32000` when it cannot help:
+reads to `<url><mcp_path>` with this computer's key, so the agent's configuration holds no
+key. The Claude Code and Antigravity plugins start it, and `setup` registers it in Claude
+Code (when the plugin is not installed) and Codex. With `--agent NAME` it uses that
+agent's key (see [Client home](#client-home)). It keeps the server's `Mcp-Session-Id`,
+waits up to 60 seconds per message, and answers requests (not notifications) with a
+JSON-RPC error `-32000` when it cannot help:
 
 | Situation | Error message |
 |---|---|
-| Not set up | ``Jezero is not connected on this computer: run `jezero_client.py init`.`` |
+| Not set up | ``Jezero is not connected on this computer (no key in /home/me/.jezero): run `jezero_client.py init`.`` |
 | HTTP error or no connection | `Jezero is not reachable right now (HTTP STATUS): DETAIL` |
 
 ## Setup
 
-`setup` registers the MCP server `jezero` in each agent found on the computer (all of
-them without `--agent`):
+`setup` registers Jezero in each agent named with `--agent` (every agent without it),
+using the key that agent uses. An agent without a key prints ``NAME: not set up
+(/home/me/.jezero): run `init` first``, and `setup` exits 1 after trying the others.
 
 | Agent | What `setup` does |
 |---|---|
-| Claude Code | `claude mcp add --scope user --transport http jezero <url>/mcp --header "Authorization: Bearer ***"`, unless `claude mcp get jezero` already finds one. |
-| Codex | Appends `[mcp_servers.jezero]` with `url` and `http_headers` to `$CODEX_HOME/config.toml`, unless that table exists. |
+| Claude Code | With the Jezero plugin installed (`jezero@` in `plugins/installed_plugins.json` of `CLAUDE_CONFIG_DIR`, default `~/.claude`): registers nothing, since the plugin brings the bridge, and removes a user-scope `jezero` entry left by an older `setup`. Without the plugin: registers the bridge at user scope, `claude mcp add --scope user jezero -- python3 <client home>/core/jezero_client.py mcp --agent claude-code` (plus `-e JEZERO_CLIENT_HOME=...` when that variable is set), replacing an old HTTP entry that held the key in clear. |
+| Codex | Writes the bridge as `[mcp_servers.jezero]` in `$CODEX_HOME/config.toml` (default `~/.codex`): `command = "python3"`, `args = ["<client home>/core/jezero_client.py", "mcp", "--agent", "codex"]`, and `env = { JEZERO_CLIENT_HOME = "..." }` when the key is not in `~/.jezero` (Codex passes few variables to MCP servers). An old block with `url` and `http_headers` is replaced; a `jezero` block that is not Jezero's bridge is left alone. The rest of the file stays byte for byte. |
 | OpenCode | With `--opencode-plugin PATH`, installs the plugin as `$XDG_CONFIG_HOME/opencode/plugins/jezero.ts` (pointing at a copy of the core in the client home) and the `jezero` skill. The plugin registers the MCP server itself. |
 | Hermes Agent | Prints the `hermes plugins install` command: the plugin brings its own tools. |
 | Antigravity | Prints the `agy plugin install` command: the plugin brings the MCP bridge, the skill and the hooks. |
 
-> [!WARNING]
-> For Claude Code and Codex, `setup` writes the key into the agent's own configuration
-> (Claude Code's user-scope MCP settings, Codex's `config.toml`). Treat those files as
-> secrets.
+What it prints, for each case:
+
+| Situation | Output |
+|---|---|
+| Claude Code, no plugin, old HTTP entry | `claude: removed the old user-scope jezero HTTP entry (it held the key in clear); MCP server jezero registered (stdio bridge; the key stays in /home/me/.jezero)` |
+| Claude Code, bridge already there | `claude: MCP server jezero already registered` |
+| Claude Code, plugin installed, old entry | `claude: the Jezero plugin brings the MCP server; nothing to register; removed the user-scope jezero entry (the plugin's own server replaces it)` |
+| Claude Code, plugin installed | `claude: the Jezero plugin brings the MCP server; nothing to register` |
+| Codex, no entry | `codex: MCP server jezero added to config.toml (stdio bridge; key in /home/me/.jezero)` |
+| Codex, old HTTP entry | `codex: replaced the old jezero entry in config.toml (it held the key in clear) with the stdio bridge` |
+| Codex, bridge already there | `codex: MCP server jezero already in config.toml` |
+
+`setup` never writes the key into an agent's configuration. Only OpenCode's plugin passes
+the key to OpenCode in memory, as a header of the remote server it registers.
 
 ## TLS
 
@@ -380,6 +452,9 @@ the core export the keychains' root certificates to `ca.pem` once and retry the 
 | Related items on the first prompt | 3, out of a search of 8 |
 | Prompt words | at least 2, at most 20 |
 | Sessions remembered as prompted | 500 |
+| Uploaded files remembered in `state.json` | 2000 (the newest) |
+| Rejected files remembered in `state.json` | 500 (the newest) |
+| Rejected files listed by `status` | 5 (the newest) |
 | Upload throttle on `stop` | once per 15 minutes per session |
 | Hermes upload throttle (`on_session_end`) | once per 10 minutes per session |
 | Upload request | 60 s |

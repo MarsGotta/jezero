@@ -311,6 +311,20 @@ def test_init_says_where_the_key_stays(tmp_path, monkeypatch, capsys) -> None:
     assert "SHA-256 fingerprint" in inspect.getsource(ConnectScreen)
 
 
+def test_init_force_keeps_settings_and_asks_for_rotate(tmp_path, monkeypatch, capsys) -> None:
+    core = load_core(tmp_path / "jz", monkeypatch)
+    assert core.init("https://lib.example", "laptop", force=False) == 0
+    cfg = json.loads(core.CONFIG.read_text())
+    cfg["projects"] = {"roots": ["work"]}
+    core.CONFIG.write_text(json.dumps(cfg))
+    capsys.readouterr()
+    assert core.init("https://lib.example", "laptop", force=True) == 0
+    out = capsys.readouterr().out
+    assert "jezero device rotate laptop " in out and "device approve" not in out
+    kept = json.loads(core.CONFIG.read_text())
+    assert kept["projects"] == {"roots": ["work"]} and "token" not in kept
+
+
 # ------------------------------------------------------------------- 6. MCP path
 
 

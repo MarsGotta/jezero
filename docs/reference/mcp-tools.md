@@ -40,7 +40,13 @@ With `[server].require_auth = true` (the default), every request carries
 constant time, with the digest of each `[[clients]]` entry: `token_sha256`, or the
 SHA-256 of the variable named by `token_env`. A client whose `token_env` is not set is
 disabled, with a warning in the log; the server refuses to start when no client has a
-usable key.
+usable key. Two clients whose `token_env` variables hold the same key are both disabled,
+with an error in the log.
+
+The server reads the `[[clients]]` list again when `jezero.toml` changes, at most once a
+second, so a key added, rotated or revoked works (or stops working) without a restart. A
+file that no longer loads leaves the previous clients in place and logs `config changed
+but could not be loaded; keeping the previous N clients`.
 
 A request without a key, or with an unknown one, gets HTTP 401 before any tool runs:
 
@@ -58,12 +64,15 @@ WWW-Authenticate: Bearer error="invalid_token", error_description="Authenticatio
 `require_auth = false` is accepted only when `[server].host` is a loopback address. Then
 no key is needed and every caller sees every source.
 
-The server also checks the `Host` header of MCP requests (DNS-rebinding protection). It
-accepts the host of `[server].public_url` (with or without a port), the values in
-`[server].allowed_hosts`, and `[server].host`, `127.0.0.1`, `localhost` and `[::1]` with
-any port. Another host gets HTTP 421 `Invalid Host header`. A browser `Origin` other than
-the public URL's and `http://127.0.0.1:*` or `http://localhost:*` gets HTTP 403
-`Invalid Origin header`. A `POST` whose `Content-Type` is not JSON gets HTTP 400.
+The server also checks the `Host` header of every request, MCP and the [HTTP
+routes](http-api.md) alike (DNS-rebinding protection). It accepts the host of
+`[server].public_url` (with or without a port), the values in `[server].allowed_hosts`,
+and `[server].host`, `127.0.0.1`, `localhost` and `[::1]` with any port. Another host gets
+HTTP 421 `Invalid Host header`. A server on `0.0.0.0` therefore refuses a computer that
+reaches it by a LAN address, unless that address is in `allowed_hosts` or `public_url`. A
+browser `Origin` other than the public URL's, `http://127.0.0.1:*`, `http://localhost:*`,
+`http://[::1]:*` or `http://` plus `[server].host` gets HTTP 403 `Invalid Origin header`.
+A `POST` to MCP whose `Content-Type` is not JSON gets HTTP 400.
 
 ## Source filtering
 
@@ -148,7 +157,7 @@ Finds items by words. Use it first.
 | `project` | string | none | Only items of this project (exact match). |
 | `source` | string | none | Only items of this source (exact name). |
 | `since` | string | none | Only items that happened at or after this ISO 8601 date or datetime; UTC when it has no offset. |
-| `limit` | integer | `[search].default_limit` (10) | Results to return, at most `[search].max_limit` (50). `0` or null: the default; below 1: 1. |
+| `limit` | integer | `[search].default_limit` (10) | Results to return, at most `[search].max_limit` (50). Missing, null, `0` or negative: the default. |
 
 How the query matches:
 
@@ -254,7 +263,7 @@ An id that does not exist, or whose source the key may not read, returns
 ## later
 
 ```text
-later(item_id, query=None, limit=5)
+later(item_id, query=None, limit=None)
 ```
 
 Newer items of the same project on the same subject: what may have changed a decision,
@@ -264,20 +273,23 @@ plan or status. Call it before relying on an item.
 |---|---|---|---|
 | `item_id` | integer | required | The item you rely on. |
 | `query` | string | the item's title | Words of what you are checking. Narrower than the title, so better. |
-| `limit` | integer | `5` | Items to return, between 1 and `[search].max_limit` (50). |
+| `limit` | integer | `5` | Items to return, at most `[search].max_limit` (50). Missing, null, `0` or negative: 5. |
 
 How it works:
 
 1. It runs a [search](#search) for `query` (or the title) restricted to the item's
    project and to items that happened at or after it, among every source the key may
-   read, without recency boost, keeping 50 candidates. An item without a project is not
-   restricted to one.
+   read, without recency boost, keeping 50 candidates. An item without a project stays
+   in its own source instead: without that limit the search would cover the whole
+   library.
 2. It keeps the candidates (other than the item itself) whose relevance is at least 30% of
    the best match's.
 3. It returns the two closest matches plus the newest of the rest, up to `limit`, newest
    first. `matched_by` is `"subject"`.
-4. If nothing is left, it returns the project's items that happened at or after the item
-   instead, newest first, and `matched_by` is `"project_timeline"`: they may be unrelated.
+4. If nothing is left, it returns the project's items (the source's, for an item without
+   a project) that happened at or after the item instead, newest first, and `matched_by`
+   is `"project_timeline"`: they may be unrelated. The Jezero app and `jezero show
+   --newer` label them `NEWER IN THIS PROJECT (by date, not by subject)`.
 
 ```json
 {"name": "later", "arguments": {"item_id": 1, "query": "invoice CSV encoding"}}
@@ -310,7 +322,7 @@ Nothing newer at all: `{"found": true, "item": {...}, "matched_by": "project_tim
 ## timeline
 
 ```text
-timeline(project=None, source=None, since=None, until=None, limit=20)
+timeline(project=None, source=None, since=None, until=None, limit=None)
 ```
 
 Items in reverse chronological order: what happened in a project or source over a period.
@@ -321,7 +333,7 @@ Items in reverse chronological order: what happened in a project or source over 
 | `source` | string | none | Only this source (exact name). |
 | `since` | string | none | Items that happened at or after this ISO 8601 date or datetime; UTC when it has no offset. |
 | `until` | string | none | Items that happened before this date or datetime (exclusive); UTC when it has no offset. |
-| `limit` | integer | `20` | Items to return, between 1 and `[search].max_limit` (50). |
+| `limit` | integer | `20` | Items to return, at most `[search].max_limit` (50). Missing, null, `0` or negative: 20. |
 
 ```json
 {"name": "timeline", "arguments": {"project": "billing", "since": "2026-10-01", "limit": 2}}
@@ -366,14 +378,17 @@ text block; only authentication and transport problems use HTTP status codes.
 |---|---|
 | A required argument is missing | `Error executing tool search: 1 validation error for searchArguments ...` |
 | An argument has the wrong type | `Error executing tool get_item: 1 validation error for get_itemArguments ...` |
-| `since` or `until` is not ISO 8601 | `Error executing tool search` (no detail) |
+| `since` or `until` is not ISO 8601 | `Error executing tool timeline: since must be an ISO 8601 date or datetime (2026-01-31 or 2026-01-31T09:00:00+02:00), got 'yesterday'` |
 | The tool does not exist | `Unknown tool: NAME` |
 
 ```json
-{"content": [{"type": "text", "text": "Error executing tool timeline"}], "isError": true}
+{"content": [{"type": "text", "text": "Error executing tool timeline: since must be an ISO 8601 date or datetime (2026-01-31 or 2026-01-31T09:00:00+02:00), got 'yesterday'"}], "isError": true}
 ```
 
-## In Hermes Agent and Antigravity
+The message names the argument and repeats the value it got (cut at 60 characters), so an
+agent can correct the call.
+
+## In Hermes Agent, Claude Code, Codex and Antigravity
 
 The Hermes plugin registers the same tools under other names, and calls the server with
 the computer's key (see [the client](client.md#hermes-agent)):
@@ -389,9 +404,10 @@ the computer's key (see [the client](client.md#hermes-agent)):
 The arguments are the same; null and empty ones are left out. Failures come back as
 `{"error": "..."}` instead of raising.
 
-Antigravity reaches the server through a local stdio bridge,
-[`jezero_client.py mcp`](client.md#mcp-bridge), so its configuration holds no key. The
-tools and results are the same.
+The Claude Code and Antigravity plugins, and what `jezero_client.py setup` registers in
+Claude Code and Codex, reach the server through a local stdio bridge,
+[`jezero_client.py mcp`](client.md#mcp-bridge), so the agent's configuration holds no
+key. The tools and results are the same.
 
 ## See also
 

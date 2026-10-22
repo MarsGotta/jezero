@@ -509,6 +509,11 @@ class ConfigEditor:
                 return
         self._edits.append(_Edit(block.body_end, block.body_end, [f"{key} = {value}\n"]))
 
+    def append(self, lines: list[str]) -> None:
+        """Add lines (each without its newline) at the end of the file."""
+        end = len(self.lines)
+        self._edits.append(_Edit(end, end, [line + "\n" for line in lines]))
+
     def result(self) -> str:
         lines = list(self.lines)
         for edit in sorted(self._edits, key=lambda e: (e.start, e.end), reverse=True):

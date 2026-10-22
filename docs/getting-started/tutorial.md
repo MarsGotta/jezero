@@ -82,7 +82,8 @@ environment variables (values never shown):
 
 The summarizer and its API key are missing on purpose. The
 [summarizer](../glossary.md#summarizer) is the language model that turns a raw session into
-an item, and the sample items you import next are already summarised.
+an item, and the sample items you import next are already summarised. `check-config`
+exits with 0: it reports a missing model only once a connector needs one.
 
 ## 3. Create the library
 
@@ -273,6 +274,7 @@ uv run jezero serve
 You should see:
 
 ```text
+WARNING  client bundle not found at /home/me/jezero/dist/jezero-client.tar.gz: run python3 scripts/build_clients.py on the server to build it
 INFO:     Started server process [12345]
 INFO:     Waiting for application startup.
 ...
@@ -280,7 +282,8 @@ INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8765 (Press CTRL+C to quit)
 ```
 
-Leave it running. The server is read-only: it has no tool that writes to the library.
+The warning is about the plugin bundle that other computers download; this tutorial does
+not need it. Leave the server running. The server is read-only: it has no tool that writes to the library.
 
 ## 9. Query it like an agent
 
@@ -344,7 +347,7 @@ You should see, below the Jezero name in block letters:
 ```text
 Connect this computer to Jezero
 
-Device key created in /home/me/.jezero (the key itself never leaves this computer).
+Device key created. The key stays in /home/me/.jezero; the server only keeps its SHA-256 fingerprint.
 Read-only: this computer's sessions are not uploaded.
 Ask the Jezero admin to approve it with:
 
@@ -369,21 +372,27 @@ uv run jezero device approve work-mac SHA256 --read-only --sources "*"
 You should see:
 
 ```text
-approved work-mac; restart the MCP server so it accepts the new key
+approved work-mac; the server picks up the new key within a second (backup: /home/me/jezero/jezero.toml.bak-20261022T034500Z)
 ```
 
 A device may read `agent-*` sources by default, and the sample items live in `demo`;
 `--sources "*"` lets this one read everything. The command added a `[[clients]]` block for
-`work-mac` to `jezero.toml`.
-
-The server reads its clients when it starts. In the second terminal, stop it with
-`Ctrl+C` and start it again:
+`work-mac` to `jezero.toml`. The running server noticed the change: there is nothing to
+restart. List the keys it now knows:
 
 ```bash
-uv run jezero serve
+uv run jezero device list
 ```
 
-Back in the first terminal, search with the new key:
+You should see:
+
+```text
+NAME      KIND    UPLOAD  SOURCES  INBOX
+tutorial  device  no      *        -
+work-mac  device  no      *        -
+```
+
+Search with the new key:
 
 ```bash
 uv run jezero find rollback
@@ -437,25 +446,28 @@ Jezero app](../how-to/app.md) covers every view.
 
 ## 12. Connect a real agent (optional)
 
-Any MCP client can now use the library with the key from step 7. With
+An agent can now use the library with this computer's key from step 10. With
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed, register the
-server from the `jezero` folder:
+client core's MCP bridge from the `jezero` folder. The bridge adds the key from
+`~/.jezero` to each request, so Claude Code's configuration never holds it:
 
 ```bash
-claude mcp add --transport http jezero http://127.0.0.1:8765/mcp \
-  --header "Authorization: Bearer $JEZERO_TOKEN"
+claude mcp add jezero -- python3 "$PWD/plugins/claude-code/core/jezero_client.py" mcp --agent claude-code
 claude mcp list
 ```
 
 You should see, among your other servers:
 
 ```text
-jezero: http://127.0.0.1:8765/mcp (HTTP) - ✔ Connected
+jezero: python3 /home/me/jezero/plugins/claude-code/core/jezero_client.py mcp --agent claude-code - ✔ Connected
 ```
 
 Start `claude` in that folder and ask *"Search Jezero: how do we roll back the invoices
 migration?"*. The agent calls `search` and answers from item 1. Without a scope flag the
 server is registered for this folder only; remove it with `claude mcp remove jezero`.
+
+An MCP client that only speaks HTTP would need the key from step 7 in its own
+configuration instead: see [Any other MCP client](../how-to/connect-agents.md#any-other-mcp-client).
 
 For day-to-day use, connect agents with the plugins instead: they bring the MCP server,
 the habit of searching Jezero and the upload of every session. See [Connect an

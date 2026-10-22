@@ -45,12 +45,54 @@ systemctl --user --failed
 | Status | Meaning |
 |---|---|
 | `ok` | The connector finished a run without errors within the last `watchdog.max_silence_hours`. |
-| `failing` | It succeeded within that window, but its latest run recorded an error or a warning, shown in `last_error`. |
+| `failing` | Its latest run recorded an error or a warning, shown in `last_error`: either it succeeded within that window before, or it has never succeeded at all. |
 | `stale` | It has not finished a successful run for longer than `max_silence_hours` (24 by default). |
-| `never` | It is enabled but has never finished a successful run. |
+| `never` | It is enabled but has not run yet. A [`--sample` pilot](sources.md#add-a-source) does not count as a run. |
 
 A run that finds nothing new still counts as a success. So `stale` never means "no new
 sessions": it means the runs stopped, or every run since then failed.
+
+## Check the connectors
+
+`jezero connector list` shows every connector, enabled or not, with what its last runs
+recorded and how many items it stored:
+
+```bash
+jezero connector list
+```
+
+You should see:
+
+```text
+NAME               TYPE         ENABLED  EVERY  LAST RUN          LAST SUCCESS  ITEMS  ERROR
+agent-claude-code  claude_code  yes      15m    2026-10-22 03:40  -             0      FileNotFoundError: projects_dir folder not found: /home/me/.
+agent-codex        codex        yes      15m    2026-10-22 03:40  -             0      FileNotFoundError: sessions_dir folder not found: /home/me/a
+```
+
+Times are UTC; `EVERY` is `interval_minutes`, and the error is cut at 60 characters. For
+the whole error, and for scripts, add `--json`:
+
+```bash
+jezero connector list --json
+```
+
+You should see, for each connector:
+
+```json
+{
+  "name": "agent-claude-code-laptop",
+  "type": "claude_code",
+  "enabled": true,
+  "interval_minutes": 15,
+  "last_run_at": "2026-10-22T03:32:31.609083+00:00",
+  "last_success_at": "2026-10-22T03:32:31.609083+00:00",
+  "last_error": null,
+  "items": 1
+}
+```
+
+`jezero device list` shows which connectors read each device's inbox (see [Manage
+computers and keys](devices.md#list-computers-and-keys)).
 
 ## Fix what it reports
 
@@ -63,15 +105,15 @@ sessions": it means the runs stopped, or every run since then failed.
    A broken connector prints its error and exits with 1, for example:
 
    ```json
-   {"connector": "agent-claude-code", "error": "FileNotFoundError: Claude Code projects directory not found: /home/me/.claude/projects"}
+   {"connector": "agent-claude-code", "error": "FileNotFoundError: projects_dir folder not found: /home/me/.claude/projects"}
    ```
 
 2. Fix the cause. The usual ones:
 
    | `last_error` or symptom | Likely cause | What to do |
    |---|---|---|
-   | `FileNotFoundError: ... not found` | The source folder or database moved, or the path option is wrong. | Fix the option in `jezero.toml` (see [Connectors](../reference/connectors.md)). |
-   | `summarizer failed after retries`, `HTTP 401`, `HTTP 404` | The model endpoint is down, the key is missing or wrong, or the model name is wrong. | Run `jezero check-config` (every variable must say `set`) and check `[summarizer]`. |
+   | `FileNotFoundError: OPTION folder not found: PATH` (or `file not found`) | The source folder or database moved, or the path option is wrong. For a `sessions_dir` glob, the folder before the first wildcard is missing. | Fix the option in `jezero.toml` (see [Connectors](../reference/connectors.md)). |
+   | `summarizer failed after retries`, `HTTP 401`, `HTTP 404` | The model endpoint is down, the key is missing or wrong, or the model name is wrong. | Run `jezero check-config`: it ends with a `problems:` list and exits with 1 when the model or its key is missing. Then check `[summarizer]`. |
    | A warning about a format the connector cannot read | The agent changed its storage format. | Update Jezero; until then the cursor stays put, so nothing is lost. |
    | `stale` with no error | The timer is not running. | Check `systemctl --user list-timers jezero-ingest.timer` and lingering (see [Start the services](deploy.md#start-the-services)). |
 
@@ -137,6 +179,13 @@ The same connector alerts again at most every `realert_hours`. When it recovers,
 counter resets, so its next problem alerts at once. If the webhook answers with an error
 status, the alert is not counted as sent and goes out again on the next check.
 
+If the webhook cannot be reached at all, the check stops sending alerts for this run,
+prints the reason and still sends the heartbeat:
+
+```json
+{"alert_error": "alert webhook failed: ConnectError"}
+```
+
 ## See what came in
 
 `jezero stats` counts the items per source and shows the newest one:
@@ -164,8 +213,9 @@ healthy and still have an old `latest`, if nobody used that agent.
 
 ## Read the logs
 
-1. The ingestion log: each run prints one JSON line per connector it ran (connectors that
-   are not due print nothing), then the health lines.
+1. The ingestion log: each run prints one JSON line per connector it ran, then, for
+   `run --due`, one line with what ran and when the others are due, then the health
+   lines.
 
    ```bash
    journalctl --user -u jezero-ingest.service -n 50
@@ -174,15 +224,30 @@ healthy and still have an old `latest`, if nobody used that agent.
    A run report looks like this:
 
    ```json
-   {"connector": "agent-claude-code", "docs": 3, "unchanged": 2, "stored": 1, "failed": 0, "deferred_sessions": 0, "redactions": 3, "input_chars": 1091, "input_tokens": 900, "output_tokens": 120, "dry_run": false, "errors": [], "warnings": []}
+   {"connector": "agent-claude-code-laptop", "docs": 1, "unchanged": 1, "stored": 0, "failed": 0, "deferred_sessions": 0, "redactions": 0, "input_chars": 0, "input_tokens": 0, "output_tokens": 0, "pruned": 0, "dry_run": false, "sample": false, "note": "nothing to summarise", "errors": [], "warnings": []}
+   {"due": {"ran": ["agent-claude-code-laptop"], "not_due_until": {}}}
    ```
 
    `docs` is what the connector collected, `unchanged` what was already stored as is,
    `stored` what the summarizer wrote, `failed` what it could not summarise (the first
    errors follow in `errors`), and `deferred_sessions` the sessions still too recent to
-   read. The token counts tell you what the run cost.
+   read. `pruned` counts stored segments removed because their session is now split
+   differently (see [Data model](../reference/data-model.md)). `sample` is `true` for a
+   `--sample` pilot, and `note` says `nothing to summarise` (with the deferred count) when
+   the run had nothing to send to the model. The token counts tell you what the run cost.
 
-2. The server log: one line per request with its status, plus one line per upload.
+   When nothing is due, the run still prints its last line, with the time each connector
+   is due next:
+
+   ```json
+   {"due": {"ran": [], "not_due_until": {"agent-claude-code-laptop": "2026-10-22T03:47:20+00:00"}}}
+   ```
+
+   With no enabled connector at all, `jezero run` prints `no enabled connectors: enable
+   one in jezero.toml`.
+
+2. The server log: one line per request with its status, plus one line per upload and
+   one line when it reloads the clients.
 
    ```bash
    journalctl --user -u jezero-serve.service -f
@@ -191,11 +256,14 @@ healthy and still have an old `latest`, if nobody used that agent.
    ```text
    INFO:     127.0.0.1:58152 - "PUT /inbox/v1/claude-code/projects/-home-me-projects-atlas/sess-9.jsonl HTTP/1.1" 200 OK
    INFO:     127.0.0.1:58162 - "GET /inbox/v1/ping HTTP/1.1" 401 Unauthorized
+   INFO     clients reloaded: admin, laptop
    ```
 
-   `401` is an unknown or missing key (often a device approved without restarting the
-   server), `403` a read-only key trying to upload, `421` a host name missing from
-   `allowed_hosts`.
+   `401` is an unknown or missing key, `403` a read-only key trying to upload, `421` a
+   host name missing from `public_url` and `allowed_hosts`. `clients reloaded` follows a
+   change to `[[clients]]` in `jezero.toml`; `config changed but could not be loaded;
+   keeping the previous N clients` means the file has an error (run `jezero
+   check-config`).
 
 Jezero writes no log files of its own. With the cron line from the deploy guide, the
 output goes to `data/logs/run.log` and `data/logs/health.log`.
@@ -206,9 +274,9 @@ output goes to `data/logs/run.log` and `data/logs/health.log`.
   newest item is less than a day old, amber within a week, grey after that. See [Use the
   Jezero app](app.md).
 - `jezero agents` lists the agents on the computer you run it on, with their plugin
-  version and the date of the newest item from that agent's device sources
-  (`agent-claude-code-laptop`, `agent-codex-work-mac` and so on) that this computer's key
-  may read:
+  version and the date of the newest item from that agent's sources that this
+  computer's key may read: the device sources (`agent-claude-code-laptop`,
+  `agent-codex-work-mac` and so on) and the server's own (`agent-claude-code`):
 
   ```bash
   jezero agents
