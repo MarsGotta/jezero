@@ -44,6 +44,11 @@ class RunReport:
         return data
 
 
+def connector_rules(config: Config, conn: ConnectorConfig) -> ProjectRules:
+    """The project rules with the connector's own `project_aliases` on top."""
+    return project_rules(config).with_aliases(dict(conn.options.get("project_aliases") or {}))
+
+
 def project_rules(config: Config) -> ProjectRules:
     p = config.projects
     return ProjectRules(paths=p.paths, roots=p.roots, aliases=p.aliases, git=p.git)
@@ -113,7 +118,9 @@ async def run_connector(
         summarizer = summarizer or Summarizer(
             config.summarizer, known_projects=config.summarizer.known_projects
         )
-        await _summarise_and_store(store, conn, pending, summarizer, report, failed_ids)
+        await _summarise_and_store(
+            store, conn, pending, summarizer, report, failed_ids, connector_rules(config, conn)
+        )
         report.input_tokens = summarizer.usage.input_tokens
         report.output_tokens = summarizer.usage.output_tokens
     report.pruned = _prune_stale_segments(store, conn.name, batch.docs, failed_ids)
@@ -144,6 +151,7 @@ async def _summarise_and_store(
     summarizer: Summarizer,
     report: RunReport,
     failed_ids: set[str],
+    rules: ProjectRules | None = None,
 ) -> None:
     for start in range(0, len(pending), CHUNK):
         chunk = pending[start : start + CHUNK]
@@ -178,8 +186,10 @@ async def _summarise_and_store(
                     questions=result.questions,
                     atoms=result.atoms,
                     # A hint from the source itself (working directory, project field)
-                    # beats the model's guess, which follows whatever the text mentions.
-                    project=doc.project_hint or result.project,
+                    # beats the model's guess, which follows whatever the text mentions;
+                    # the guess still goes through the aliases.
+                    project=doc.project_hint
+                    or (rules.rename(result.project) if rules else result.project),
                     original=text,
                     original_ref=doc.original_ref,
                     trust=conn.effective_trust,

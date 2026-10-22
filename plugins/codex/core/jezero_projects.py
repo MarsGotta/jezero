@@ -129,6 +129,13 @@ class ProjectRules:
 
     # -- the rules -------------------------------------------------------------------
 
+    def rename(self, name: str | None) -> str | None:
+        """`name` after the aliases (for a project that came from elsewhere, such as the
+        summarizer's guess); unchanged when no alias matches."""
+        if not name:
+            return name
+        return self.aliases.get(_norm(name), name)
+
     def project_for(self, cwd: str | None, session_file: Path | None = None) -> str | None:
         found = read_sidecar(session_file) if session_file else None
         if not found and cwd:

@@ -228,10 +228,11 @@ def _run_selected(
 
 
 def cmd_retag(config: Config, args: argparse.Namespace) -> int:
-    """Re-apply the source's own project hints to stored items. No LLM calls."""
+    """Re-apply the source's project hints and the project aliases to stored items. No LLM
+    calls."""
     import fcntl
 
-    from .pipeline import build_connector
+    from .pipeline import build_connector, connector_rules
     from .store import ConnectorState
 
     conn = next((c for c in config.connectors if c.name == args.connector), None)
@@ -246,15 +247,19 @@ def cmd_retag(config: Config, args: argparse.Namespace) -> int:
             print(json.dumps({"skipped": "another run is in progress"}))
             return 0
         batch = build_connector(config, conn).collect(ConnectorState(name=conn.name))
+        rules = connector_rules(config, conn)
         changed = 0
         for doc in batch.docs:
-            if not doc.project_hint:
+            current = store.project_of(conn.name, doc.external_id)
+            # The source's own hint wins; otherwise the stored tag (the summarizer's guess)
+            # goes through the aliases, so a new alias fixes old guesses too.
+            wanted = doc.project_hint or (rules.rename(current) if current else None)
+            if not wanted or current is None or current == wanted:
                 continue
             if args.dry_run:
-                current = store.project_of(conn.name, doc.external_id)
-                changed += int(current is not None and current != doc.project_hint)
+                changed += 1
             else:
-                changed += int(store.set_project(conn.name, doc.external_id, doc.project_hint))
+                changed += int(store.set_project(conn.name, doc.external_id, wanted))
     report = {"connector": conn.name, "docs": len(batch.docs), "retagged": changed}
     print(json.dumps(report | {"dry_run": bool(args.dry_run)}))
     return 0
@@ -765,7 +770,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ids-file", help="file with item ids, one per line")
     p.set_defaults(fn=cmd_resummarize)
 
-    p = sub.add_parser("retag", help="re-apply project hints from the source, without the LLM")
+    p = sub.add_parser(
+        "retag", help="re-apply the source's project hints and the project aliases, without the LLM"
+    )
     p.add_argument("--connector", required=True, help="connector whose items are retagged")
     p.add_argument("--dry-run", action="store_true", help="count changes without writing")
     p.set_defaults(fn=cmd_retag)

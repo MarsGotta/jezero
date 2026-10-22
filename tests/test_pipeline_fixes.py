@@ -303,3 +303,49 @@ def test_items_carry_the_connector_trust(tmp_path: Path) -> None:
     run(config, store, summarizer=FakeSummarizer())
     (hit,) = store.search("Synthetic")
     assert hit.item.trust == "external"
+
+
+# -- the summarizer's project guess goes through the aliases ---------------------------
+
+
+class GuessingSummarizer(FakeSummarizer):
+    async def summarize(self, text: str, *, title_hint=None, context=None) -> Summary:
+        self.calls.append(text)
+        return Summary("Synthetic title", "Synthetic summary.", ["q?"], [], "Northwind")
+
+
+def test_model_guess_goes_through_aliases_and_retag_fixes_old_ones(tmp_path: Path) -> None:
+    from jezero.cli import main as cli_main
+
+    path = claude_session(tmp_path / "claude", "s1", 4)
+    path.write_text(path.read_text().replace('"cwd": "/w/projects/demo"', '"cwd": "/w/x"'))
+    os.utime(path, (OLD, OLD))
+    config = make_config(tmp_path)
+    store = Store(config.db_path)
+    store.init()
+    run(config, store, summarizer=GuessingSummarizer())
+    (hit,) = store.search("Synthetic")
+    assert hit.item.project == "Northwind"  # no alias yet: the guess is kept
+
+    aliased = make_config(
+        tmp_path,
+        options={"projects_dir": str(tmp_path / "claude"), "project_aliases": {"northwind": "atlas"}},
+    )
+    cfg_file = tmp_path / "jezero.toml"
+    cfg_file.write_text(
+        f'''[storage]
+path = "{config.db_path}"
+
+[[connectors]]
+name = "agent-claude"
+type = "claude_code"
+[connectors.options]
+projects_dir = "{tmp_path / "claude"}"
+settle_minutes = 0
+project_aliases = {{ "northwind" = "atlas" }}
+'''
+    )
+    assert cli_main(["-c", str(cfg_file), "retag", "--connector", "agent-claude"]) == 0
+    (hit,) = store.search("Synthetic")
+    assert hit.item.project == "atlas"
+    assert aliased.connectors[0].options["project_aliases"] == {"northwind": "atlas"}

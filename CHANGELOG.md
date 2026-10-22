@@ -123,6 +123,9 @@
   (`skip_project_dirs`).
 - The MCP server unit stops within 10 s: clients keep streams open and the default 90 s
   wait made restarts slow.
+- The summarizer's project guess goes through `[projects].aliases` and the connector's
+  `project_aliases`, like the source's own hint; `jezero retag` applies new aliases to
+  stored guesses too.
 - The `claude_code` connector takes a glob in `projects_dir`, like `codex` does in
   `sessions_dir`: one connector follows the config folder of every agent an orchestrator
   runs, reads a session copied between folders once (the newest copy), and passes the

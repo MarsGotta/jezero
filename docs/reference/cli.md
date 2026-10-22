@@ -298,7 +298,7 @@ jezero resummarize [-h] [--ids IDS] [--ids-file IDS_FILE]
 
 ### `jezero retag`
 
-Re-apply project hints from the source, without the LLM.
+Re-apply the source's project hints and the project aliases, without the LLM.
 
 ```text
 jezero retag [-h] --connector CONNECTOR [--dry-run]
