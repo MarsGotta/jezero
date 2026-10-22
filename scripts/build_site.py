@@ -135,7 +135,8 @@ def stage_page(text: str, source: Path) -> str:
 def home_page(text: str) -> str:
     """docs/README.md with the hero in place of its title and opening paragraphs."""
     body = text.split("\n## ", 1)[1]
-    return "---\ntitle: Jezero\nhide:\n  - navigation\n  - toc\n---\n\n" + HERO + "\n## " + body
+    front = "---\ntitle: Shared memory for your agents\nhide:\n  - navigation\n  - toc\n---\n"
+    return front + "\n" + HERO + "\n## " + body
 
 
 def stage() -> None:
