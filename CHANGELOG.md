@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.0 - 2026-10-23
+
+First release on PyPI: `pip install jezero` or `uv tool install jezero`. Device
+client 0.5.3.
+
 - Second review before the first release. Server: a `.env` re-pointed by a symlink or
   saved with invalid UTF-8 is handled on reload (an unreadable one disables `token_env`
   clients); Host checks ignore case and cover websockets; inbox project names may use any
