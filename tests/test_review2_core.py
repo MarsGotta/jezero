@@ -109,11 +109,19 @@ def test_redaction_stays_linear_on_long_hostile_lines() -> None:
         "contraseña: " + "a" * 50_000,
         "mysql " + "-p " * 20_000,
         "123456789:" * 5_000,
+        "a_key=" * 8_000,
     ]
-    start = time.perf_counter()
+    # Linear means doubling the input roughly doubles the time; a quadratic rule gives 4x.
+    # Ratios, not absolute times, so a slow CI runner does not fail the test.
     for text in hostile:
+        half = text[: len(text) // 2]
+        r.redact(half)
+        start = time.perf_counter()
+        r.redact(half)
+        small = max(time.perf_counter() - start, 1e-3)
+        start = time.perf_counter()
         r.redact(text)
-    assert time.perf_counter() - start < 5
+        assert (time.perf_counter() - start) / small < 3.2, text[:20]
 
 
 # -- 2. a damaged store or no memory keeps the cursor -----------------------------------------

@@ -71,12 +71,14 @@ _PW_VALUE = (
 )
 
 # Names ending in `_KEY` (`OPENROUTER_KEY`, `SECRET_KEY`): only values that look like a
-# key (16 or more characters with a digit, then `_keyish` below), since `sort_key = name`
+# key (16 or more characters, then `_keyish` below: a digit and no words), since `sort_key = name`
 # and `idempotency_key = "order-2024-10-23-0000001"` are ordinary code.
+# No "has a digit" look-ahead here: `_keyish` already requires one, and a look-ahead that
+# scans to the end of the line from every `*_key` made long lines quadratic.
 _KEYISH_VALUE = (
-    r"(?P<value>\"" + _NOT_A_VALUE + r"(?=[^\"\s]*\d)[^\"\s]{16,}\""
-    r"|'" + _NOT_A_VALUE + r"(?=[^'\s]*\d)[^'\s]{16,}'"
-    r"|" + _NOT_A_VALUE + r"(?=[^\s\"',;`)\]}]*\d)[^\s\"',;`)\]}]{16,})"
+    r"(?P<value>\"" + _NOT_A_VALUE + r"[^\"\s]{16,}\""
+    r"|'" + _NOT_A_VALUE + r"[^'\s]{16,}'"
+    r"|" + _NOT_A_VALUE + r"[^\s\"',;`)\]}]{16,})"
 )
 _PW_VALUE_GROUP = "(?P<value>" + _PW_VALUE + ")"
 
@@ -130,7 +132,16 @@ _COOKIE_SECRET_NAME = re.compile(
     r"(?i)(?:^|[;\s])[^=;\s]*(?:sess|sid|token|auth|jwt|csrf|xsrf|remember|login|secret|key)"
     r"[^=;\s]*="
 )
-_COOKIE_OPAQUE = re.compile(r"=(?=[^;\s]*\d)(?=[^;\s]*[A-Za-z])[^;\s]{16,}")
+# One greedy run per value: the run from the first `=` holds every later one, so checking
+# it alone is equivalent and stays linear (look-aheads from each `=` were quadratic).
+_COOKIE_RUN = re.compile(r"=([^;\s]{16,})")
+
+
+def _opaque_cookie_value(value: str) -> bool:
+    return any(
+        any(c.isdigit() for c in run) and any(c.isascii() and c.isalpha() for c in run)
+        for run in _COOKIE_RUN.findall(value)
+    )
 
 
 def _session_cookie(match: re.Match[str]) -> bool:
@@ -141,9 +152,7 @@ def _session_cookie(match: re.Match[str]) -> bool:
     if not _COOKIE_START.match(value):
         return False
     return (
-        ";" in value
-        or _COOKIE_SECRET_NAME.search(value) is not None
-        or _COOKIE_OPAQUE.search(value) is not None
+        ";" in value or _COOKIE_SECRET_NAME.search(value) is not None or _opaque_cookie_value(value)
     )
 
 
