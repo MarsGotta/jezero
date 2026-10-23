@@ -84,6 +84,11 @@ uv tool install jezero      # or: pipx install jezero, or: pip install jezero
 jezero --version
 ```
 
+To run it as a server from PyPI (config, systemd units, and the plugin bundle downloaded
+from the GitHub release with its `SHA256SUMS`), see
+[Run Jezero as a service](docs/how-to/deploy.md#server-from-pypi). Upgrade with
+`uv tool upgrade jezero`.
+
 ## Get started
 
 From a checkout, with [uv](https://docs.astral.sh/uv/):
@@ -91,14 +96,16 @@ From a checkout, with [uv](https://docs.astral.sh/uv/):
 ```bash
 git clone https://github.com/MarsGotta/jezero.git && cd jezero
 uv sync
-cp jezero.example.toml jezero.toml
+printf '[storage]\npath = "data/jezero.db"\n\n[server]\nhost = "127.0.0.1"\nport = 8765\nrequire_auth = false\n' > jezero.toml
+uv run jezero check-config
 uv run jezero init
 uv run jezero import-jsonl examples/items.example.jsonl --source demo
 uv run jezero search "migration rollback"
 ```
 
-The [tutorial](docs/getting-started/tutorial.md) takes it from there: serve the library
-over MCP and connect an agent, in about fifteen minutes.
+That `jezero.toml` is the tutorial's minimal local library; `jezero.example.toml`
+documents every field. The [tutorial](docs/getting-started/tutorial.md) takes it from
+there: serve the library over MCP and connect an agent, in about fifteen minutes.
 
 ## Connect your agents
 
@@ -114,7 +121,11 @@ hermes plugins install MarsGotta/jezero/plugins/hermes --enable
 agy plugin install https://github.com/MarsGotta/jezero/tree/main/plugins/antigravity
 ```
 
-OpenCode and any other MCP client: see [Connect an agent](docs/how-to/connect-agents.md).
+These follow `main`. To pin a release, add its tag: `MarsGotta/jezero#v0.1.0` for Claude
+Code, `MarsGotta/jezero@v0.1.0` for Codex, `tree/v0.1.0/plugins/antigravity` for
+Antigravity; Hermes Agent pins only to a commit SHA (`--ref`). The Jezero app installs the
+plugins from its own release tag by itself. OpenCode and any other MCP client: see
+[Connect an agent](docs/how-to/connect-agents.md).
 
 ## The Jezero app
 

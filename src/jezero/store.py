@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS connector_state (
 
 _TERM_RE = re.compile(r'"([^"]+)"|(\S+)')
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_SPLIT_WORD_RE = re.compile(r"\s\S*\Z")
 
 MAX_QUERY_CHARS = 4096
 """Longer query text is cut to this many characters before it is split into terms."""
@@ -108,11 +109,21 @@ def build_match_query(query: str, *, min_term_length: int = 3) -> str | None:
     The cost is bounded whatever the caller sends: control characters (NUL ends an FTS5
     string early) become spaces, the text is cut to `MAX_QUERY_CHARS`, each term to
     `MAX_TERM_CHARS`, and only the first `MAX_QUERY_TERMS` distinct terms are kept.
+    The cut falls between terms: a word it would split is dropped, and a phrase whose
+    closing quote is past the cut is read as separate words. A quote left without its
+    pair never becomes part of a term.
     """
-    text = _CONTROL_RE.sub(" ", query[:MAX_QUERY_CHARS])
+    text = query
+    if len(text) > MAX_QUERY_CHARS:
+        text = text[:MAX_QUERY_CHARS]
+        split = _SPLIT_WORD_RE.search(text)
+        if not query[MAX_QUERY_CHARS].isspace() and split is not None:
+            text = text[: split.start()]  # drop the word the cut fell in
+    text = _CONTROL_RE.sub(" ", text)
     parts: dict[str, None] = {}
     for phrase, word in _TERM_RE.findall(text):
-        term = (phrase or word).strip()[:MAX_TERM_CHARS].strip()
+        # An unmatched quote reaches here as part of a word (`"abc`): strip it.
+        term = (phrase or word.strip('"')).strip()[:MAX_TERM_CHARS].strip()
         if len(term) < min_term_length:
             continue
         parts['"' + term.replace('"', '""') + '"'] = None

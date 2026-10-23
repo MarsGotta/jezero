@@ -26,8 +26,8 @@ from .config import (
 )
 from .connectors import CONNECTOR_TYPES
 from .ingest import IngestError, import_jsonl
-from .models import Item
-from .redact import Redactor
+from .models import Item, clean_display
+from .redact import Redaction, Redactor
 from .store import Store, StoreError, sqlite_version
 
 EXIT_LOCKED = 3
@@ -42,6 +42,19 @@ def _locked(command: str) -> int:
         file=sys.stderr,
     )
     return EXIT_LOCKED
+
+
+def format_validation_error(exc: ValidationError) -> list[str]:
+    """One line per problem: the field path and pydantic's message. No documentation URL
+    and no input values (a wrong value may be a secret pasted in the wrong place)."""
+    lines = []
+    for error in exc.errors(include_url=False, include_input=False, include_context=False):
+        path = ""
+        for part in error.get("loc", ()):
+            path += f"[{part}]" if isinstance(part, int) else (f".{part}" if path else str(part))
+        message = " ".join(str(error.get("msg", "invalid value")).split())
+        lines.append(f"{path}: {message}" if path else message)
+    return lines or ["invalid value"]
 
 
 def _store(config: Config) -> Store:
@@ -124,10 +137,12 @@ def cmd_search(config: Config, args: argparse.Namespace) -> int:
     )
     for hit in hits:
         item = hit.item
-        print(
+        # Stored text may hold terminal escape sequences; they are never printed.
+        line = (
             f"[{item.id}] {hit.score:7.3f}  {item.occurred_at:%Y-%m-%d}  {item.source}  "
             f"{item.project or '-'}  {item.title}"
         )
+        print(" ".join(clean_display(line).split("\n")))
     if not hits:
         print("no results")
     return 0
@@ -183,8 +198,16 @@ def cmd_eval(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+class _CleanRedactor(Redactor):
+    """Drops terminal control characters (see `clean_display`) before redacting, so an
+    imported title, summary, atom or original cannot carry escape sequences."""
+
+    def redact(self, text: str) -> Redaction:
+        return super().redact(clean_display(text) if text else text)
+
+
 def cmd_import_jsonl(config: Config, args: argparse.Namespace) -> int:
-    redactor = Redactor(config.redaction.extra_patterns, enabled=config.redaction.enabled)
+    redactor = _CleanRedactor(config.redaction.extra_patterns, enabled=config.redaction.enabled)
     counts = import_jsonl(
         _store(config),
         Path(args.path),
@@ -251,7 +274,7 @@ def _run_selected(
 ) -> int:
     import asyncio
 
-    from .pipeline import run_connector
+    from .pipeline import run_connector, scrub_error
 
     now = datetime.now(UTC)
     status = 0
@@ -273,7 +296,7 @@ def _run_selected(
                 )
             )
         except Exception as exc:  # one broken source must not stop the others
-            error = f"{type(exc).__name__}: {exc}"[:1000]
+            error = scrub_error(f"{type(exc).__name__}: {exc}", config)[:1000]
             if args.sample is None and not args.dry_run:  # pilots leave the state alone
                 state = replace(
                     store.get_state(conn.name),
@@ -434,7 +457,8 @@ def cmd_resummarize(config: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_redact_stored(config: Config, args: argparse.Namespace) -> int:
-    """Re-apply the current redaction rules to items already stored (no LLM calls)."""
+    """Re-apply the current redaction rules to items already stored, and drop terminal
+    control characters from what is shown of them (no LLM calls)."""
     redactor = Redactor(config.redaction.extra_patterns, enabled=config.redaction.enabled)
 
     def redact(text: str) -> tuple[str, int]:
@@ -446,7 +470,79 @@ def cmd_redact_stored(config: Config, args: argparse.Namespace) -> int:
     items, total = store.redact_stored(redact, dry_run=args.dry_run)
     verb = "would redact" if args.dry_run else "redacted"
     print(f"{verb} {total} secrets in {items} items")
+    cleaned = clean_stored_controls(store, dry_run=args.dry_run)
+    verb = "would remove" if args.dry_run else "removed"
+    print(f"{verb} terminal control characters from {cleaned} items")
     return 0
+
+
+def clean_stored_controls(store: Store, *, dry_run: bool) -> int:
+    """Drop terminal control characters (`clean_display`) from the title, summary,
+    questions and atoms of stored items, and keep the search index in sync. Returns how
+    many items had some.
+
+    The kept original and `content_hash` are left alone: the hash is that of the redacted
+    source text, which is what the next run compares, so no item is summarised again. The
+    original is cleaned when it is shown instead.
+    """
+    con = store.connect()
+    changed = 0
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        rows = con.execute(
+            "SELECT id, title, summary, questions, atoms, project FROM items"
+        ).fetchall()
+        for row in rows:
+            dirty = False
+
+            def clean(text: str) -> str:
+                nonlocal dirty
+                new = clean_display(text)
+                dirty = dirty or new != text
+                return new
+
+            title, summary = clean(row["title"]), clean(row["summary"])
+            questions = [
+                clean(q) if isinstance(q, str) else q for q in json.loads(row["questions"] or "[]")
+            ]
+            atoms = json.loads(row["atoms"] or "[]")
+            for atom in atoms:
+                if isinstance(atom, dict) and isinstance(atom.get("text"), str):
+                    atom["text"] = clean(atom["text"])
+            if not dirty:
+                continue
+            changed += 1
+            new_questions = json.dumps(questions, ensure_ascii=False)
+            new_atoms = json.dumps(atoms, ensure_ascii=False)
+            if dry_run:
+                continue
+            con.execute(
+                "UPDATE items SET title = ?, summary = ?, questions = ?, atoms = ? WHERE id = ?",
+                (title, summary, new_questions, new_atoms, row["id"]),
+            )
+            con.execute("DELETE FROM items_fts WHERE rowid = ?", (row["id"],))
+            con.execute(
+                "INSERT INTO items_fts (rowid, title, summary, questions, atoms, project) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    row["id"],
+                    title,
+                    summary,
+                    "\n".join(str(q or "") for q in questions),
+                    "\n".join(
+                        str(a.get("text") or "") if isinstance(a, dict) else str(a) for a in atoms
+                    ),
+                    row["project"] or "",
+                ),
+            )
+        con.execute("COMMIT")
+    except BaseException:
+        if con.in_transaction:
+            con.execute("ROLLBACK")
+        raise
+    finally:
+        con.close()
+    return changed
 
 
 def cmd_device_approve(config: Config, args: argparse.Namespace) -> int:
@@ -732,7 +828,7 @@ def cmd_connector_list(config: Config, args: argparse.Namespace) -> int:
             _short_time(e["last_run_at"]),  # type: ignore[arg-type]
             _short_time(e["last_success_at"]),  # type: ignore[arg-type]
             str(e["items"]),
-            (str(e["last_error"])[:60] if e["last_error"] else "-"),
+            (clean_display(str(e["last_error"]))[:60] if e["last_error"] else "-"),
         ]
         for e in entries
     ]
@@ -865,7 +961,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("run", help="run connectors once: collect, summarise, store")
     p.add_argument("--connector", help="only this connector (default: every enabled one)")
-    p.add_argument("--limit", type=int, help="process at most N units, oldest first")
+    p.add_argument(
+        "--limit",
+        type=int,
+        help="process about N units, oldest first; it may take more than N to keep units "
+        "that share a timestamp in the same run",
+    )
     p.add_argument("--sample", type=int, help="process the newest N units, cursor untouched")
     p.add_argument("--dry-run", action="store_true", help="count work without calling the LLM")
     p.add_argument(
@@ -873,8 +974,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.set_defaults(fn=cmd_run)
 
-    p = sub.add_parser("redact-stored", help="apply the current redaction rules to stored items")
-    p.add_argument("--dry-run", action="store_true", help="count secrets without writing")
+    p = sub.add_parser(
+        "redact-stored",
+        help="apply the current redaction rules to stored items and drop terminal control "
+        "characters from their titles, summaries, questions and atoms (no LLM calls)",
+    )
+    p.add_argument("--dry-run", action="store_true", help="count changes without writing")
     p.set_defaults(fn=cmd_redact_stored)
 
     p = sub.add_parser("device", help="devices that upload sessions (Jezero plugins)")
@@ -975,7 +1080,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except ValidationError as exc:
-        print(f"invalid config:\n{exc}", file=sys.stderr)
+        for line in format_validation_error(exc):
+            print(f"invalid config: {line}", file=sys.stderr)
         return 2
     except tomllib.TOMLDecodeError as exc:
         print(f"error: the config is not valid TOML: {exc}", file=sys.stderr)

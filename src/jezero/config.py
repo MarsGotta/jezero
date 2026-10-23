@@ -8,6 +8,7 @@ and versioned without leaking credentials.
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 import re
 import tomllib
@@ -16,8 +17,19 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+
+log = logging.getLogger(__name__)
 
 CONFIG_ENV_VAR = "JEZERO_CONFIG"
 DEFAULT_CONFIG_NAME = "jezero.toml"
@@ -30,7 +42,40 @@ _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", use_attribute_docstrings=True)
+    # hide_input_in_errors: a rejected value may be a secret written inline by mistake
+    # (`token = "..."`), and errors end up on screen and in the server log.
+    model_config = ConfigDict(
+        extra="forbid", use_attribute_docstrings=True, hide_input_in_errors=True
+    )
+
+
+def is_loopback_host(host: str | None) -> bool:
+    """True for `localhost` and loopback addresses (127.0.0.0/8, ::1)."""
+    if not host:
+        return False
+    host = host.strip("[]").lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def format_config_error(exc: BaseException) -> str:
+    """A config error as one readable line: each problem's field and message.
+
+    For a pydantic ValidationError this leaves out the rejected input and the link to
+    the pydantic docs; other errors (TOML syntax, a missing file) keep their message.
+    """
+    if isinstance(exc, ValidationError):
+        problems = []
+        for err in exc.errors(include_url=False, include_input=False, include_context=False):
+            where = ".".join(str(part) for part in err.get("loc", ()))
+            message = str(err.get("msg", "invalid value")).removeprefix("Value error, ")
+            problems.append(f"{where}: {message}" if where else message)
+        return "; ".join(problems) or "invalid config"
+    return str(exc) or type(exc).__name__
 
 
 class StorageConfig(_Strict):
@@ -80,6 +125,22 @@ class SummarizerConfig(_Strict):
     output_language: str | None = None
     """Write every summary in this language (e.g. "Spanish") so one query matches all
     items. Default: the document's main language."""
+    allow_insecure_http: bool = False
+    """Accept an `http://` base_url on a host that is not loopback. Off by default: the
+    API key would travel in clear. Turn on only for a private network you trust."""
+
+    @model_validator(mode="after")
+    def _no_key_in_clear(self) -> SummarizerConfig:
+        parts = urlsplit(self.base_url)
+        if parts.scheme.lower() != "http" or self.allow_insecure_http:
+            return self
+        if is_loopback_host(parts.hostname):
+            return self
+        raise ValueError(
+            "summarizer.base_url uses http:// to a host that is not loopback, so the API "
+            "key would travel in clear. Use https://, a loopback address, or set "
+            "allow_insecure_http = true in [summarizer] if the network path is private"
+        )
 
 
 class ServerConfig(_Strict):
@@ -108,12 +169,7 @@ class ServerConfig(_Strict):
 
     @property
     def is_loopback(self) -> bool:
-        if self.host == "localhost":
-            return True
-        try:
-            return ipaddress.ip_address(self.host).is_loopback
-        except ValueError:
-            return False
+        return is_loopback_host(self.host)
 
     @model_validator(mode="after")
     def _no_open_network_server(self) -> ServerConfig:
@@ -304,6 +360,16 @@ class Config(_Strict):
     projects: ProjectsConfig = Field(default_factory=ProjectsConfig)
 
     source_file: Path | None = Field(default=None, exclude=True)
+    _loaded_from: Path | None = PrivateAttr(default=None)
+
+    @property
+    def loaded_from(self) -> Path | None:
+        """The config path as given (absolute, symlinks kept); `source_file` resolves them.
+
+        Reloads go through this path so the `.env` next to it is the same file each time,
+        even when a folder on the way is a symlink that gets re-pointed.
+        """
+        return self._loaded_from or self.source_file
 
     @model_validator(mode="after")
     def _unique_names(self) -> Config:
@@ -372,7 +438,19 @@ def resolve_config_path(explicit: str | os.PathLike[str] | None = None) -> Path:
 
 
 _ENV_FROM_FILE: dict[Path, dict[str, str]] = {}
-"""Per `.env` file, the variables it put into os.environ and the values it gave them."""
+"""Per `.env` file, the variables it put into os.environ and the values it gave them.
+
+Keyed by the path as configured (absolute, symlinks not resolved): a `.env` that is a
+symlink re-pointed to a new target (`ln -sfn`, a Kubernetes secret's `..data` swap) is
+still the same file, so its rotated values replace the old ones."""
+
+
+class EnvFileError(OSError):
+    """The `.env` file exists but could not be read."""
+
+
+def _env_key(path: Path) -> Path:
+    return Path(os.path.abspath(path))
 
 
 def load_env_file(path: Path) -> list[str]:
@@ -381,12 +459,24 @@ def load_env_file(path: Path) -> list[str]:
     Variables set by anything else win, so a service manager can always override the file.
     A variable this file set earlier follows the file: loading it again applies a changed
     value and removes a deleted line, so a running server picks up a rotated or removed
-    `token_env` key when it reloads the config. Returns the names that were set or changed
-    (never the values).
+    `token_env` key when it reloads the config. When a key appears twice, the last line
+    wins. Bytes that are not valid UTF-8 are replaced (with a warning) rather than
+    refused, so one stray character in a comment does not keep an old key alive. Raises
+    EnvFileError when the file cannot be read at all. Returns the names that were set or
+    changed (never the values).
     """
-    owned = _ENV_FROM_FILE.setdefault(path.resolve(), {})
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise EnvFileError(f"could not read {path}: {exc.strerror or exc}") from exc
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        text = data.decode("utf-8", errors="replace")
+        log.warning("%s is not valid UTF-8: the bad bytes were replaced; save it as UTF-8", path)
+    owned = _ENV_FROM_FILE.setdefault(_env_key(path), {})
     wanted: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -430,19 +520,22 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
     env_file = env_file_for(config_path)
     if env_file.is_file():
         load_env_file(env_file)
-    elif env_file.resolve() in _ENV_FROM_FILE:
+    elif env_file.exists():
+        raise EnvFileError(f"could not read {env_file}: not a regular file")
+    elif _env_key(env_file) in _ENV_FROM_FILE:
         # The file was there and is gone: what it set goes with it.
         load_env_file_removed(env_file)
     with config_path.open("rb") as fh:
         data = tomllib.load(fh)
     config = Config.model_validate(data)
     config.source_file = config_path.resolve()
+    config._loaded_from = _env_key(config_path)
     return config
 
 
 def load_env_file_removed(path: Path) -> None:
     """Forget the variables a `.env` file that no longer exists had set."""
-    owned = _ENV_FROM_FILE.pop(path.resolve(), {})
+    owned = _ENV_FROM_FILE.pop(_env_key(path), {})
     for key, value in owned.items():
         if os.environ.get(key) == value:
             del os.environ[key]
@@ -528,6 +621,9 @@ class _Edit:
 def _edit_lock(path: Path) -> Iterator[None]:
     """Hold an exclusive lock on `.<config name>.lock` next to the config (POSIX only).
 
+    The lock file (`.jezero.toml.lock` for `jezero.toml`) is created with mode 0600 and
+    left in place; it holds no data.
+
     Two admin commands that commit at the same moment take turns, so the second one sees
     the first one's change and refuses instead of overwriting it.
     """
@@ -537,7 +633,10 @@ def _edit_lock(path: Path) -> Iterator[None]:
         yield
         return
     lock_path = path.parent / f".{path.name}.lock"
-    with lock_path.open("a+b") as handle:
+    # Owner-only, like the config it guards; an older lock file is tightened too.
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "r+b") as handle:
+        os.fchmod(handle.fileno(), 0o600)
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
             yield

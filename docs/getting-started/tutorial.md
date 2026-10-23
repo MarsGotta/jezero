@@ -27,10 +27,10 @@ uv sync
 uv run jezero --version
 ```
 
-You should see:
+You should see `jezero` and its version, for example:
 
 ```text
-jezero 0.1.0.dev0
+jezero 0.1.0
 ```
 
 `uv run` runs a command inside the project's own environment, so nothing is installed
@@ -274,7 +274,7 @@ uv run jezero serve
 You should see:
 
 ```text
-WARNING  client bundle not found at /home/me/jezero/dist/jezero-client.tar.gz: run python3 scripts/build_clients.py on the server to build it
+WARNING  client bundle not found at /home/me/jezero/dist/jezero-client.tar.gz: run python3 scripts/build_clients.py in a checkout, or download jezero-client.tar.gz from the GitHub release of this version
 INFO:     Started server process [12345]
 INFO:     Waiting for application startup.
 ...

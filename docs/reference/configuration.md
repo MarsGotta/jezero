@@ -76,6 +76,7 @@ The model that writes each item.
 | `max_input_chars` | integer (≥ 1000) | `60000` | Longer inputs are split into parts, each summarised on its own. |
 | `known_projects` | list of string | empty | Project slugs the summarizer should prefer when tagging items. |
 | `output_language` | string (optional) | none | Write every summary in this language (e.g. "Spanish") so one query matches all items. Default: the document's main language. |
+| `allow_insecure_http` | boolean | `false` | Accept an `http://` base_url on a host that is not loopback. Off by default: the API key would travel in clear. Turn on only for a private network you trust. |
 
 ## server
 

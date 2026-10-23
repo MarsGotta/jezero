@@ -294,8 +294,10 @@ keeps each item's source, id, date and project. It calls the model once per item
 ## Hide more secrets
 
 Jezero redacts common credential shapes (API keys and tokens of common services, private
-keys even when cut short, webhook URLs, `Authorization` and `Cookie` headers, passwords in
-assignments, command lines and URLs) before anything is summarised, stored or indexed. Add your own
+keys even when cut short, webhook URLs, `Authorization` and session `Cookie` headers,
+passwords in assignments, command lines and URLs) before anything is summarised, stored or
+indexed. Errors kept as a connector's `last_error` go through the same rules, and the
+summarizer's own API key is replaced wherever a provider echoes it back. Add your own
 patterns for what only you know, such as internal host names or customer ids.
 
 1. Add regular expressions (Python syntax) to `[redaction]`. Single quotes keep
@@ -322,11 +324,17 @@ patterns for what only you know, such as internal host names or customer ids.
 
    ```text
    would redact 120 secrets in 3 items
+   would remove terminal control characters from 0 items
    redacted 120 secrets in 3 items
+   removed terminal control characters from 0 items
    ```
 
    It rewrites titles, summaries, questions, atoms and the kept original text, and keeps
-   the search index in sync. It makes no model calls.
+   the search index in sync. It makes no model calls. It also drops terminal control
+   characters and escape sequences (such as `ESC ] 52`, which sets the clipboard) from
+   titles, summaries, questions and atoms, so printing an item cannot drive your
+   terminal. That cleaning leaves the original text and its content hash alone, so no
+   item is summarised again because of it.
 
 > [!WARNING]
 > Redaction catches common shapes; it is not a guarantee. Keep sources known to carry
@@ -393,6 +401,10 @@ what you changed:
   ```json
   {"connector": "agent-claude-code", "docs": 3, "unchanged": 0, "stored": 3, "failed": 0, "deferred_sessions": 0, "redactions": 0, "input_chars": 3186, "input_tokens": 300, "output_tokens": 150, "pruned": 3, "dry_run": false, "sample": false, "note": null, "errors": [], "warnings": []}
   ```
+
+- A connector that now names its originals differently (Paperclip refs gained the
+  company id): unchanged units get the new `original_ref` in place, with no summarizer
+  calls, and the report adds `"refs_updated"` with how many.
 
 Run `jezero run --connector NAME --dry-run` after the reset to see `docs` and
 `input_chars` before you pay for it. To only fix projects, use `jezero retag`, which

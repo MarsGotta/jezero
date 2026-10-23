@@ -141,10 +141,18 @@ rules to what is already stored.
 | `opencode` | `opencode-session:<session id>` |
 | `hermes` | `hermes-session:<session id>` |
 | `antigravity` | `antigravity-conversation:<conversation id>` |
-| `paperclip` | `paperclip-issue:<company id>/<identifier>` (items stored before 0.1.0: `paperclip-issue:<identifier>`) |
+| `paperclip` | `paperclip-issue:<company id>/<identifier>` (items stored before 0.1.0 have `paperclip-issue:<identifier>` until their issue is read again; see [Read a source again](../how-to/sources.md#read-a-source-again)) |
 | `jsonl` | the record's `original_ref`, or null |
 
-All the segments of one session share its `original_ref`.
+All the segments of one session share its `original_ref`. When a connector starts naming
+an original differently, the next read of an unchanged unit updates `original_ref` in place
+without summarising it again.
+
+Titles, summaries, questions and atoms never hold terminal control characters: C0 controls
+other than newline and tab, DEL, C1 controls and whole escape sequences (`ESC [ ... m`,
+`ESC ] 8 ; ; URL BEL`, `ESC ] 52 ; ...`) are dropped from what the summarizer writes and
+from imported records. The original of a session keeps them, since it feeds the content
+hash; `jezero search`, `find`, `show` and the app drop them when they print anything.
 
 ## Ids
 
@@ -203,7 +211,8 @@ Example: a long Claude Code session `4b1c2d9e-...` gives
 ## JSON Lines import
 
 `jezero import-jsonl PATH --source NAME` stores items that are already summarised, one
-JSON object per line. Every text field is redacted on the way in.
+JSON object per line. Every text field is redacted on the way in, and terminal control
+characters are dropped from it.
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|

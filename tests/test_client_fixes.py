@@ -602,6 +602,7 @@ def test_flush_prints_counts_without_a_terminal(tmp_path) -> None:
         "gone": 0,
         "failed": 0,
         "rejected": 0,
+        "waiting": 0,
     }
 
 

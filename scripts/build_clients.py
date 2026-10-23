@@ -18,6 +18,13 @@ Output:
   so `claude plugin marketplace add OWNER/jezero` and `codex plugin marketplace add
   OWNER/jezero` install straight from the repository.
 
+Only files that git tracks are copied: an untracked or ignored file under clients/ (a
+`.env`, `node_modules/`, a `*.bak`) stops the build instead of reaching the bundle. Outside
+a git checkout (an sdist) the list is CLIENT_FILES, which must equal `git ls-files clients/`.
+The bundle is reproducible (sorted entries, fixed owner and mtime from SOURCE_DATE_EPOCH or
+the last commit), and its SHA-256 is printed so it can be compared with the release's
+SHA256SUMS.
+
 Run it after changing anything under clients/. `--check` only verifies that the
 committed copy matches clients/ (CI runs it).
 """
@@ -25,9 +32,14 @@ committed copy matches clients/ (CI runs it).
 from __future__ import annotations
 
 import filecmp
+import functools
+import gzip
+import hashlib
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -39,6 +51,140 @@ DIST = ROOT / "dist"
 OUT = DIST / "client"
 PROJECTS = ROOT / "src" / "jezero" / "projects.py"
 """Project detection, shared with the server: shipped next to the core."""
+
+CLIENT_FILES = (
+    "clients/README.md",
+    "clients/antigravity/hooks.json",
+    "clients/antigravity/mcp_config.json",
+    "clients/antigravity/plugin.json",
+    "clients/claude-code/.claude-plugin/plugin.json",
+    "clients/claude-code/.mcp.json",
+    "clients/claude-code/hooks/hooks.json",
+    "clients/codex/.codex-plugin/plugin.json",
+    "clients/codex/hooks/hooks.json",
+    "clients/core/jezero_client.py",
+    "clients/hermes/__init__.py",
+    "clients/hermes/plugin.yaml",
+    "clients/opencode/jezero.ts",
+    "clients/opencode/package.json",
+    "clients/ruff.toml",
+    "clients/skill/SKILL.md",
+)
+"""Every file under clients/. In a git checkout `git ls-files clients/` must list exactly
+these (add a new file here when you add it to git); outside one (an sdist) only these are
+read. Nothing else under clients/ is ever copied into the bundle or plugins/."""
+
+
+CACHE_DIRS = {"__pycache__", ".ruff_cache", ".pytest_cache", ".mypy_cache"}
+"""Caches that tools write by themselves (`ruff check clients` makes clients/.ruff_cache,
+because clients/ruff.toml is a ruff project root). Never copied, and allowed to exist."""
+
+
+def _ignorable(rel: str) -> bool:
+    return bool(CACHE_DIRS & set(rel.split("/"))) or rel.endswith((".pyc", ".pyo"))
+
+
+def _git_files(*args: str) -> list[str]:
+    out = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "-z", *args, "--", "clients/"],
+        capture_output=True,
+        check=True,
+    ).stdout
+    return sorted(p for p in out.decode().split("\0") if p)
+
+
+@functools.cache
+def client_files() -> tuple[str, ...]:
+    """The files of clients/ that may be shipped, relative to the repository root.
+
+    Exits with a message when clients/ holds a file git does not track (or, outside a git
+    checkout, a file not in CLIENT_FILES), or when a listed file is missing.
+    """
+    if (ROOT / ".git").exists() and shutil.which("git"):
+        stray = [p for p in _git_files("--others") if not _ignorable(p)]
+        if stray:
+            raise SystemExit(
+                "clients/ holds files that git does not track. They are never shipped, but\n"
+                "the bundle must match the repository: delete them, move them out of\n"
+                "clients/, or `git add` them (and list them in CLIENT_FILES):\n"
+                + "\n".join(f"  {p}" for p in stray)
+            )
+        files = _git_files()
+        if set(files) != set(CLIENT_FILES):
+            missing = sorted(set(files) - set(CLIENT_FILES))
+            extra = sorted(set(CLIENT_FILES) - set(files))
+            raise SystemExit(
+                "CLIENT_FILES in scripts/build_clients.py does not match `git ls-files clients/`"
+                + "".join(f"\n  not in CLIENT_FILES: {p}" for p in missing)
+                + "".join(f"\n  not tracked by git: {p}" for p in extra)
+            )
+    else:
+        files = sorted(CLIENT_FILES)
+        on_disk = sorted(
+            p.relative_to(ROOT).as_posix()
+            for p in SRC.rglob("*")
+            if (p.is_file() or p.is_symlink()) and not _ignorable(p.relative_to(ROOT).as_posix())
+        )
+        stray = sorted(set(on_disk) - set(files))
+        if stray:
+            raise SystemExit(
+                "clients/ holds files that are not in CLIENT_FILES; delete or move them:\n"
+                + "\n".join(f"  {p}" for p in stray)
+            )
+    for rel in files:
+        path = ROOT / rel
+        if path.is_symlink() or not path.is_file():
+            raise SystemExit(f"{rel} is missing or not a regular file")
+    return tuple(files)
+
+
+def copy_tree(agent: str, target: Path) -> None:
+    """Copy clients/<agent>/ into `target`, file by file from client_files()."""
+    prefix = f"clients/{agent}/"
+    files = [rel for rel in client_files() if rel.startswith(prefix)]
+    if not files:
+        raise SystemExit(f"no files for {agent} under clients/")
+    for rel in files:
+        dest = target / rel[len(prefix) :]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / rel, dest)
+
+
+def source_date_epoch() -> int:
+    """The timestamp stored in the bundle: SOURCE_DATE_EPOCH, else the last commit's."""
+    if os.environ.get("SOURCE_DATE_EPOCH", "").isdigit():
+        return int(os.environ["SOURCE_DATE_EPOCH"])
+    if (ROOT / ".git").exists() and shutil.which("git"):
+        out = subprocess.run(
+            ["git", "-C", str(ROOT), "log", "-1", "--format=%ct"], capture_output=True, text=True
+        ).stdout.strip()
+        if out.isdigit():
+            return int(out)
+    return 315532800  # 1980-01-01, the oldest time a zip can hold
+
+
+def write_bundle(folder: Path, bundle: Path, arcname: str = "jezero-client") -> str:
+    """Write `folder` as a reproducible .tar.gz and return its SHA-256."""
+    mtime = source_date_epoch()
+    paths = [folder, *sorted(folder.rglob("*"), key=lambda p: p.relative_to(folder).as_posix())]
+
+    def normalize(info: tarfile.TarInfo) -> tarfile.TarInfo:
+        info.uid = info.gid = 0
+        info.uname = info.gname = ""
+        info.mtime = mtime
+        info.mode = 0o755 if info.isdir() or info.mode & 0o100 else 0o644
+        return info
+
+    with (
+        bundle.open("wb") as raw,
+        gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=mtime) as gz,
+        tarfile.open(fileobj=gz, mode="w", format=tarfile.GNU_FORMAT) as tar,
+    ):
+        for path in paths:
+            rel = path.relative_to(folder).as_posix()
+            name = arcname if rel == "." else f"{arcname}/{rel}"
+            tar.add(path, arcname=name, recursive=False, filter=normalize)
+    return hashlib.sha256(bundle.read_bytes()).hexdigest()
 
 
 def version() -> str:
@@ -60,7 +206,7 @@ REPO_FILES = (
 
 
 def plugin(agent: str, target: Path) -> None:
-    shutil.copytree(SRC / agent, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    copy_tree(agent, target)
     (target / "core").mkdir()
     shutil.copy2(SRC / "core" / "jezero_client.py", target / "core" / "jezero_client.py")
     shutil.copy2(PROJECTS, target / "core" / "jezero_projects.py")
@@ -190,13 +336,13 @@ def main() -> int:
     shutil.copy2(SRC / "README.md", OUT / "README.md")
     marketplaces(OUT, "")
     bundle = DIST / "jezero-client.tar.gz"
-    with tarfile.open(bundle, "w:gz") as tar:
-        tar.add(OUT, arcname="jezero-client")
+    digest = write_bundle(OUT, bundle)
 
     if (ROOT / REPO_PLUGINS).exists():
         shutil.rmtree(ROOT / REPO_PLUGINS)
     repo_copy(ROOT)
     print(f"built {OUT}, {bundle} and {REPO_PLUGINS}/ (version {version()})")
+    print(f"sha256 {digest}  {bundle.name}")
     return 0
 
 

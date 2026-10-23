@@ -269,7 +269,7 @@ def test_invalid_since_message_reaches_the_agent(tmp_path) -> None:
             text = result.content[0].text
             field = "since" if "since" in args else "until"
             assert f"{field} must be an ISO 8601 date or datetime" in text
-            assert repr(args[field]) in text
+            assert repr(args[field]) not in text  # the value is not echoed (it is logged)
 
 
 # -- 7. overview keeps its days when the key reads nothing ------------------------------------

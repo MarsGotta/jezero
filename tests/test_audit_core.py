@@ -216,7 +216,7 @@ def _openai_summarizer(handler, monkeypatch) -> Summarizer:
     monkeypatch.setenv("AUDIT_FAKE_KEY", "x")
     cfg = SummarizerConfig(
         provider="openai_compatible",
-        base_url="http://llm.invalid/v1",
+        base_url="https://llm.invalid/v1",
         model="m",
         api_key_env="AUDIT_FAKE_KEY",
     )
@@ -227,7 +227,7 @@ def _anthropic_summarizer(handler, monkeypatch) -> Summarizer:
     monkeypatch.setenv("AUDIT_FAKE_KEY", "x")
     cfg = SummarizerConfig(
         provider="anthropic",
-        base_url="http://llm.invalid",
+        base_url="https://llm.invalid",
         model="m",
         api_key_env="AUDIT_FAKE_KEY",
     )

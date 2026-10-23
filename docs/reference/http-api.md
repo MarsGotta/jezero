@@ -29,13 +29,17 @@ Every route, MCP and the OAuth metadata included, checks the `Host` and `Origin`
 first, with the rules of [the MCP endpoint](mcp-tools.md#authentication): an unknown host
 gets HTTP 421 with the plain-text body `Invalid Host header`, an unknown browser origin
 HTTP 403 `Invalid Origin header`, before the key is looked at. So a request with no key and
-an unknown host gets 421, not 401. An unknown path behind an unknown host also gets 421. A computer that reaches the server by a name or
+an unknown host gets 421, not 401. An unknown path behind an unknown host also gets 421.
+Host names match in any case (`LOCALHOST:8000` is `localhost:8000`); ports must match
+exactly. A computer that reaches the server by a name or
 address missing from `public_url` and `allowed_hosts` is refused on every route.
 
 Keys are read again from `jezero.toml` (and `token_env` values from the `.env` next to it)
 within a second of a change, so a key approved, rotated or revoked with [`jezero
-device`](cli.md#jezero-device) needs no restart. If the file does not load, only the
-clients whose `[[clients]]` entry is unchanged keep working until it does.
+device`](cli.md#jezero-device) needs no restart. A `.env` that is a symlink is reloaded
+when it points to a new target. If the file does not load, only the clients whose
+`[[clients]]` entry is unchanged keep working until it does; if the `.env` cannot be
+read, clients whose key comes from `token_env` are refused until it can.
 
 ## Check a device key
 
@@ -52,7 +56,7 @@ curl -s https://YOUR-JEZERO/inbox/v1/ping -H "Authorization: Bearer $JEZERO_DEVI
 You should see:
 
 ```json
-{"ok": true, "device": "laptop", "version": "0.1.0.dev0"}
+{"ok": true, "device": "laptop", "version": "0.1.0"}
 ```
 
 | Status | Body | When |
@@ -76,7 +80,7 @@ like a local store (see [Connectors](connectors.md#source-names)).
 |---|---|---|
 | `Authorization` | yes | `Bearer <key>` of a client with `upload = true`. |
 | `Content-Encoding` | no | `gzip`, `zstd`, or absent / `identity` for the raw bytes (case does not matter). Nothing else. |
-| `X-Jezero-Project` | no | The project the device found for this session. Must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`. |
+| `X-Jezero-Project` | no | The project the device found for this session, percent-encoded as UTF-8 when it is not ASCII (`dise%C3%B1o` for `diseño`). After decoding and NFC normalisation it must be 1 to 64 characters: letters of any script, digits, `.`, `_` and `-`, starting with a letter or digit. |
 | `Content-Length` | no | When larger than the limit, the upload is refused before the body is read. A body sent without it (chunked) is read up to the limit and refused with 413 as soon as it passes. |
 
 The body is the file itself. `{agent}` and `{relpath}` must match one of these:
@@ -107,7 +111,10 @@ not valid zstd are stored as sent, and the connector skips them.
 
 With `[inbox].max_device_mb` set, an upload that would take the device's folder past that
 many MB (the file it replaces does not count) is refused with 507. Two uploads of one
-device at the same moment may both pass, so the folder can end one file over.
+device at the same moment may both pass, so the folder can end one file over. The server
+keeps each device folder's size in memory, adds every accepted upload to it and measures
+the folder again at least every 5 minutes, so files removed by hand count within that
+time.
 
 ```bash
 gzip -c ~/.claude/projects/-home-me-projects-billing/4b1c2d9e.jsonl | \
@@ -136,7 +143,7 @@ You should see:
 | 400 | `path escapes the inbox` | The resolved path leaves the device's folder. |
 | 400 | `body is not valid gzip` | `Content-Encoding: gzip` with a body that is not gzip (`zstd`: `body is not valid zstd`). |
 | 400 | `empty body` | The file is empty. |
-| 400 | `invalid project name` | `X-Jezero-Project` does not match its pattern. |
+| 400 | `invalid project name` | `X-Jezero-Project` is not valid percent-encoded UTF-8, or does not match its pattern. |
 | 401 | `missing bearer token` | No `Authorization: Bearer` header. |
 | 401 | `unknown token` | The key matches no client. |
 | 403 | `this key may not upload` | The client has `upload = false`. |
@@ -184,7 +191,7 @@ You should see:
   "ok": true,
   "device": "reader",
   "upload": false,
-  "version": "0.1.0.dev0",
+  "version": "0.1.0",
   "items": 4,
   "days": ["2026-10-19", "2026-10-20", "2026-10-21"],
   "sources": {

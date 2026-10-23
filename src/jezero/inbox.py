@@ -26,10 +26,14 @@ import io
 import os
 import re
 import tempfile
+import threading
+import time
+import unicodedata
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import zstandard
 
@@ -128,7 +132,10 @@ def check_compressed_file(relpath: str, data: bytes, *, max_bytes: int) -> None:
 
 
 def device_usage(inbox_dir: Path, device: str, *, skip: Path | None = None) -> int:
-    """Bytes in a device's inbox folder, without `skip` (the file an upload replaces)."""
+    """Bytes in a device's inbox folder, without `skip` (the file an upload replaces).
+
+    Walks the whole folder; `store` uses the cached `_USAGE` instead.
+    """
     total = 0
     for root, _, files in os.walk(inbox_dir / device):
         for name in files:
@@ -142,6 +149,54 @@ def device_usage(inbox_dir: Path, device: str, *, skip: Path | None = None) -> i
     return total
 
 
+USAGE_RECOMPUTE_SECONDS = 300.0
+"""A device's cached folder size is walked again at least this often (files removed by
+hand or by a cleanup job are seen within this time)."""
+
+
+class _UsageCache:
+    """Bytes used per device folder, kept up to date by each accepted upload.
+
+    Walking a folder of tens of thousands of files on every upload is slow; the total is
+    computed once, adjusted by every write, and recomputed every
+    `USAGE_RECOMPUTE_SECONDS`.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._totals: dict[Path, tuple[int, float]] = {}
+
+    def get(self, folder: Path) -> int:
+        with self._lock:
+            cached = self._totals.get(folder)
+            if cached is not None and time.monotonic() - cached[1] < USAGE_RECOMPUTE_SECONDS:
+                return cached[0]
+        total = device_usage(folder.parent, folder.name)
+        with self._lock:
+            self._totals[folder] = (total, time.monotonic())
+        return total
+
+    def add(self, folder: Path, delta: int) -> None:
+        with self._lock:
+            cached = self._totals.get(folder)
+            if cached is not None:
+                self._totals[folder] = (max(cached[0] + delta, 0), cached[1])
+
+    def clear(self) -> None:
+        with self._lock:
+            self._totals.clear()
+
+
+_USAGE = _UsageCache()
+
+
+def _size(path: Path) -> int:
+    try:
+        return path.lstat().st_size
+    except OSError:
+        return 0
+
+
 async def read_stream(chunks: AsyncIterator[bytes], *, max_bytes: int) -> bytes:
     """Collect a request body chunk by chunk, refusing it (413) as soon as it passes
     `max_bytes`: a body sent without Content-Length never sits whole in memory."""
@@ -153,7 +208,32 @@ async def read_stream(chunks: AsyncIterator[bytes], *, max_bytes: int) -> bytes:
     return bytes(buffer)
 
 
-_PROJECT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_PROJECT = re.compile(r"[^\W_][\w.-]{0,63}")
+"""A project name: letters of any script (`diseño`), digits, `.`, `_` and `-`, starting
+with a letter or digit, at most 64 characters. Matched with fullmatch, after NFC."""
+
+
+def project_from_header(value: str | None) -> str | None:
+    """The `X-Jezero-Project` header as a project name (None when absent or empty).
+
+    The value is percent-decoded as UTF-8 (`dise%C3%B1o`); raw UTF-8 bytes in the header
+    are accepted too. The name is NFC-normalised, then checked by `store`.
+    """
+    if not value:
+        return None
+    if len(value) > 1024:
+        raise InboxError("invalid project name")
+    if not value.isascii():
+        # Starlette decodes header bytes as Latin-1: get the UTF-8 the client sent.
+        try:
+            value = value.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError) as exc:
+            raise InboxError("invalid project name") from exc
+    try:
+        value = unquote(value, encoding="utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise InboxError("invalid project name") from exc
+    return unicodedata.normalize("NFC", value) or None
 
 
 def store(
@@ -171,32 +251,40 @@ def store(
     `project` is what the device's client found for the session (its git repository or
     configured folders); it goes next to the file as `<file>.project` for the connectors.
     With `max_device_bytes`, an upload that would take the device's folder past it is
-    refused with 507 (the file it replaces does not count). Two uploads of one device at
-    the same moment may each pass the check, so the folder can end one file over.
+    refused with 507 (the file it replaces does not count). The folder's size is cached
+    (see `_UsageCache`), not walked on every upload. Two uploads of one device at the same
+    moment may each pass the check, so the folder can end one file over.
     """
     target = target_path(inbox_dir, device, agent, relpath)
     if not data:
         raise InboxError("empty body")
-    if project is not None and not _PROJECT.match(project):
-        raise InboxError("invalid project name")
+    if project is not None:
+        project = unicodedata.normalize("NFC", project)
+        if not _PROJECT.fullmatch(project):
+            raise InboxError("invalid project name")
+    folder = inbox_dir.resolve() / device
+    sidecar = Path(str(target) + SIDECAR_SUFFIX)
+    before = _size(target) + _size(sidecar)
     if max_device_bytes is not None:
-        used = device_usage(inbox_dir.resolve(), device, skip=target)
+        used = _USAGE.get(folder) - _size(target)
         if used + len(data) > max_device_bytes:
             raise InboxError(
                 "device inbox full: the server's inbox.max_device_mb is reached", status=507
             )
     target.parent.mkdir(parents=True, exist_ok=True)
-    sidecar = Path(str(target) + SIDECAR_SUFFIX)
-    if project:
-        sidecar.write_text(project + "\n", encoding="utf-8")
-    else:
-        sidecar.unlink(missing_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".upload-")
     try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
-        os.replace(tmp, target)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+        if project:
+            sidecar.write_text(project + "\n", encoding="utf-8")
+        else:
+            sidecar.unlink(missing_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".upload-")
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+            os.replace(tmp, target)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
+    finally:
+        _USAGE.add(folder, _size(target) + _size(sidecar) - before)
     return Stored(path=target, bytes=len(data))

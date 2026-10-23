@@ -65,6 +65,7 @@ from .look import (
     sparkline,
     wordmark,
 )
+from .safe import CleanBackend, clean_tree, unwrap
 
 CSS = """
 Screen { background: $background; }
@@ -198,6 +199,8 @@ def item_view(
     """One memory: title, where it comes from, summary, atoms, questions, newer items.
     `matched_by` is how the server found them: "project_timeline" means nothing later
     matched the subject, and they are only the project's newer items, by date."""
+    item = clean_tree(item)
+    newer = clean_tree(newer)
     parts: list[Any] = []
     parts.append(Text(str(item.get("title") or "(untitled)"), style=f"bold {p.foreground}"))
     meta = Text()
@@ -260,6 +263,7 @@ def item_view(
 
 
 def result_line(item: dict[str, Any], p: Palette, width: int = 60) -> Text:
+    item = clean_tree(item)
     title = str(item.get("title") or "")
     if len(title) > width:
         title = title[: width - 1] + "…"
@@ -588,6 +592,9 @@ class JezeroApp(App[None]):
                 self.backend = DemoBackend() if demo else RemoteBackend()
             except BackendError as exc:
                 self.problem = str(exc)
+        if self.backend is not None:
+            # Every string from the server is shown without terminal control characters.
+            self.backend = CleanBackend(self.backend)  # type: ignore[assignment]
         self.overview_data: dict[str, Any] = {}
         self.results: dict[str, dict] = {}
         self.current: dict[str, Any] | None = None
@@ -604,8 +611,9 @@ class JezeroApp(App[None]):
 
     @property
     def now(self) -> datetime:
-        if isinstance(self.backend, DemoBackend):
-            return self.backend.now
+        backend = unwrap(self.backend)
+        if isinstance(backend, DemoBackend):
+            return backend.now
         return datetime.now(UTC)
 
     # ---------------------------------------------------------------------- layout

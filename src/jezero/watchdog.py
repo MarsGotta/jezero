@@ -8,6 +8,11 @@ a JSON alert is POSTed there, at most once per `realert_hours` per connector. If
 `watchdog.heartbeat_url_env` is set, every check also pings that push URL with
 `status=up|down`: the monitor on the other end alerts when the pings stop, which also
 covers the scheduler itself dying.
+
+Everything the watchdog reports (a connector's last error, the alert text and body, a
+webhook failure) goes through the redactor first, and the value of every secret the
+config references by environment variable (the summarizer's API key, client keys,
+connector secrets, the webhook and heartbeat URLs) is replaced wherever it appears.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import httpx
 
 from .config import Config
 from .connectors import CONNECTOR_TYPES
+from .redact import Redactor
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -37,6 +43,26 @@ class ConnectorHealth:
     @property
     def healthy(self) -> bool:
         return self.status == "ok"
+
+
+SECRET_LABEL = "[REDACTED:secret]"  # noqa: S105  a placeholder, not a password
+_MIN_SECRET_CHARS = 6
+"""Shorter values are not replaced literally (they would match ordinary words)."""
+
+
+def scrub(config: Config, text: str | None) -> str | None:
+    """`text` without secrets: the redactor's patterns (always on here, whatever
+    `redaction.enabled` says) and the literal value of every referenced secret."""
+    if not text:
+        return text
+    secrets = [
+        value
+        for name in config.env_report()
+        if (value := os.environ.get(name)) and len(value) >= _MIN_SECRET_CHARS
+    ]
+    for value in sorted(set(secrets), key=len, reverse=True):
+        text = text.replace(value, SECRET_LABEL)
+    return Redactor(config.redaction.extra_patterns).redact(text).text
 
 
 def evaluate(config: Config, store: Store, *, now: datetime | None = None) -> list[ConnectorHealth]:
@@ -65,7 +91,7 @@ def evaluate(config: Config, store: Store, *, now: datetime | None = None) -> li
                 status=status,
                 last_success_at=state.last_success_at,
                 hours_since_success=round(since.total_seconds() / 3600, 2) if since else None,
-                last_error=state.last_error,
+                last_error=scrub(config, state.last_error),
             )
         )
     return report
@@ -102,6 +128,7 @@ def alert(
             last = store.get_meta(key)
             if unreachable or (last and now - datetime.fromisoformat(last) < gap):
                 continue
+            error = scrub(config, entry.last_error)
             text = (
                 f"jezero: connector {entry.connector} is {entry.status}"
                 + (
@@ -109,13 +136,15 @@ def alert(
                     if entry.hours_since_success
                     else ""
                 )
-                + (f": {entry.last_error[:300]}" if entry.last_error else "")
+                + (f": {error[:300]}" if error else "")
             )
+            body = {**asdict(entry), "last_error": error, "text": text}
             try:
-                resp = http.post(url, json={"text": text, **asdict(entry)})
+                resp = http.post(url, json=body)
             except (httpx.HTTPError, httpx.InvalidURL) as exc:
                 problem = f"alert webhook failed: {type(exc).__name__}"
-                log.warning("%s: %s", problem, exc)
+                # The exception text may hold the webhook URL, itself a secret.
+                log.warning("%s: %s", problem, scrub(config, str(exc)))
                 if errors is not None:
                     errors.append(problem)
                 unreachable = True  # no more posts this check; the next one tries again
@@ -145,5 +174,6 @@ def heartbeat(
         else f"{len(report)} connectors ok"
     )
     with httpx.Client(timeout=15, transport=transport) as http:
+        msg = scrub(config, msg) or ""
         resp = http.get(url, params={"status": status, "msg": msg[:250], "ping": ""})
     return status if resp.status_code < 400 else None

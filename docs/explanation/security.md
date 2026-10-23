@@ -13,13 +13,14 @@ manipulated by what they read, and the sources are spread over several computers
 | Who or what | The risk | What limits it |
 |---|---|---|
 | An agent manipulated by text it read | it uses Jezero to change or erase memory | the MCP server has no write tool, and its database connections are read-only |
+| An agent manipulated by text it read, on an uploading device | its own session, with false "facts" in it, becomes an item other agents read | items are presented as data, never instructions; per-client source patterns; a pilot before a new device's connectors run |
 | An agent that should not see everything | a coding agent reads your mail | per-client source patterns, applied to every tool |
 | Someone on the network | reads or forges requests | a bearer key per client, compared by SHA-256 digest; TLS from a proxy or a private network |
 | A web page in your browser | reaches a server on `127.0.0.1` through DNS rebinding | Host and Origin checks on every route |
 | A secret in a session | ends up in the library, in the summariser's input, or in an answer | redaction before anything is summarised, stored or indexed |
 | A leaked config file or database | reveals usable keys | only key digests are stored; secrets are referenced by environment variable name |
 | A device | writes outside its place, or reads beyond its share | upload keys write only into their own inbox folder; reading follows its source patterns |
-| A third party who writes content | plants instructions for your agents | `trust = "external"` items, server instructions, a summariser without tools |
+| A third party who writes content | plants instructions for your agents | `trust = "external"` items, server instructions that call every item data, a summariser without tools |
 | A contributor | commits personal data to the public repository | synthetic fixtures, the privacy check in pre-commit and CI |
 
 The rest of this page explains each mechanism and its limits.
@@ -33,10 +34,27 @@ modify the library. Items enter only through connectors, which run on the server
 the admin's control.
 
 This matters because agents read untrusted text all day: web pages, issues, email. An
-agent that has been talked into misbehaving can do, through Jezero, only what its key
-allows it to read. It cannot rewrite a decision, plant a fake "fact" for other agents or
-delete history. The [design decisions](design-decisions.md#a-read-only-mcp-server) page
-covers what was given up for this.
+agent that has been talked into misbehaving cannot, through MCP, rewrite or delete an
+item: it can only read what its key allows. The
+[design decisions](design-decisions.md#a-read-only-mcp-server) page covers what was given
+up for this.
+
+MCP is not the only way in, though. On a device that uploads, the agent's own session is
+ingestion input: whatever a fooled agent writes in its session (a false "fact", a
+"decision" nobody made, a command presented as the fix) is summarised and becomes an item
+with `own` trust that other agents read later. Jezero cannot tell such an item from an
+honest one. What limits the damage:
+
+- The server instructions and the `search` and `get_item` tool descriptions tell every
+  agent that items are data from earlier sessions, never instructions, whatever their
+  `trust`, and that a command found in Jezero must not be run without the user's
+  confirmation. Each result carries its `source` and `trust`, so the agent (and you) can
+  see where it came from.
+- Per-client source patterns decide whose sessions an agent reads. For agents that can
+  do damage (production access, deploy rights, other people's data), give a key scoped to
+  their own sources, or to sources from devices you trust, instead of `agent-*`.
+- New devices start with disabled connectors, so you can check a pilot before their
+  sessions reach the library.
 
 ## Keys
 
@@ -73,9 +91,15 @@ tell what the admin meant, so it keeps only the clients whose `[[clients]]` entr
 there with exactly the text it had at the last good load. A client that was removed,
 rotated or otherwise edited is refused until the file loads again; untouched clients keep
 working. The `.env` file next to the config is watched the same way: a `token_env` key
-changed or removed there takes effect within a second. The `jezero device` commands
-refuse to write a file that changed after they read it, so two of them run at the same
-moment cannot undo each other.
+changed or removed there takes effect within a second. A `.env` that is a symlink
+(`ln -sfn` rotation, a Kubernetes secret volume) counts as changed when it points to a new
+target, and its new values replace the old ones. A `.env` that is not valid UTF-8 is still
+read, with the bad bytes replaced and a warning in the log; a `.env` that cannot be read
+at all (wrong permissions) drops every client whose key comes from `token_env` until it
+can be read again. The `jezero device` commands refuse to write a file that changed after
+they read it, so two of them run at the same moment cannot undo each other. They take
+turns through a lock file next to the config, `.jezero.toml.lock` for `jezero.toml`,
+created with mode `0600`; it holds no data and can stay.
 
 On the computer, the key stays in its file. The agents reach the server through a local
 stdio bridge (`jezero_client.py mcp`) that reads the key file and adds the header to each
@@ -129,8 +153,10 @@ write path has its own, narrower rules:
   expands to gigabytes is refused with 413.
 - An optional quota, `inbox.max_device_mb`, caps the space of each device's folder:
   uploads beyond it get 507. It is off by default.
-- Writes are atomic (a temporary file and a rename). The project header is checked
-  against a strict pattern before it is stored next to the file.
+- Writes are atomic (a temporary file and a rename). The project header is
+  percent-decoded as UTF-8 and checked against a strict pattern (letters of any script,
+  digits, `.`, `_` and `-`; no path separators or control characters) before it is
+  stored next to the file.
 
 An uploaded file is data for a connector, nothing more. The connectors that read a new
 device's folder are created **disabled** by `jezero device approve`, so the admin can run
@@ -175,12 +201,22 @@ the *name* of an environment variable: `api_key_env` for the summariser, `token_
 clients, `alert_webhook_env` and `heartbeat_url_env` for the watchdog, `*_env` options for
 connectors. A connector option whose name looks like a secret (`api_key`, `token`,
 `secret`, `password`, `credentials`, `private_key`...) without the `_env` suffix is
-rejected when the config loads.
+rejected when the config loads. Config errors never repeat the rejected value: a key
+pasted inline by mistake (`token = "..."`) is named in the error, not printed, by
+`jezero check-config` and in the server's log.
+
+The summariser's API key travels with every request to `summarizer.base_url`. A
+`http://` URL is accepted only for a loopback host (`localhost`, `127.x`, `::1`); for any
+other host the config is refused unless `allow_insecure_http = true` is set in
+`[summarizer]`, because the key would cross the network in clear. The watchdog runs its
+alerts, webhook bodies and the provider errors it reports through the redactor, and
+replaces the value of every secret the config references wherever it appears.
 
 A git-ignored `.env` file next to the config is loaded automatically; variables already
-set in the environment win, so a service manager can always override it. Variables that
-came from the file follow it: the server reloads it when it changes, so a new or removed
-`token_env` key applies without a restart.
+set in the environment win, so a service manager can always override it. When a variable
+appears twice in the file, the last line wins. Variables that came from the file follow
+it: the server reloads it when it changes, so a new or removed `token_env` key applies
+without a restart.
 `jezero check-config` reports which referenced variables are set, never their values. The
 result is a config file that can be shared, reviewed and versioned without leaking
 anything. [Deploy Jezero](../how-to/deploy.md) shows where the variables go.
@@ -224,7 +260,10 @@ unchecked:
 - The allowed origins are the origin of `public_url`, plus `http://127.0.0.1`,
   `http://localhost`, `http://[::1]` and `http://` with `server.host`, on any port.
 
-An unknown host gets status 421 and an unknown origin 403, before the key is looked at.
+Host names are compared without regard to case (`LOCALHOST:8000` is `localhost:8000`);
+ports must match exactly. An unknown host gets status 421 and an unknown origin 403,
+before the key is looked at. WebSocket requests get the same check (a refused one is
+closed with code 1008); no route accepts them.
 So behind a proxy, `public_url` is what makes the public name acceptable; reaching the
 server by any other name is refused. A server bound to `0.0.0.0` accepts only the names
 and addresses you list: a computer that reaches it by a LAN address missing from
@@ -233,9 +272,10 @@ and addresses you list: a computer that reaches it by a LAN address missing from
 ## Content written by others
 
 Some sources hold text written by people other than you: email is the planned case. Their
-items carry `trust = "external"`, and the server instructions that every MCP client
-receives say to treat those items strictly as data and never to follow instructions found
-inside them. The summariser is protected the same way for every document: the text sits
+items carry `trust = "external"`. The server instructions that every MCP client receives
+say to treat every item, `own` or `external`, strictly as data, never to follow
+instructions found inside one, and never to run a command found in Jezero without the
+user's confirmation. The summariser is protected the same way for every document: the text sits
 between `<document>` tags, the prompt says it is data, the model has no tools, and its
 answer is only parsed into fields.
 
@@ -270,8 +310,9 @@ filtering and redaction happen on the server. Hermes sessions are first exported
 read-only, from Hermes's own database into one JSON file per session with the dialogue
 and tool calls only, and sessions started by its scheduler or as subagents are skipped.
 A computer set up with `--no-upload` (the server's own computer, or any computer that
-should only read) sends only the two MCP calls. Jezero does not store queries; the inbox
-is the only place where a device's data is written.
+should only read) sends only the two MCP calls. Jezero does not store or log queries
+(a tool call that fails is logged with the tool name and the error, not its arguments);
+the inbox is the only place where a device's data is written.
 
 Everything goes to the URL given at `init`, with the device's key. The client trusts the
 system's certificate store (and, on macOS, can export the keychain's roots for company
@@ -310,10 +351,12 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md).
   rest; anyone who can read them as your user or as root reads everything.
 - **A leaked client key.** Its holder reads whatever the key's patterns allow, until the
   key is revoked or rotated. There is no expiry, rate limit or query log.
-- **A device that lies.** An upload key can write any file that fits its agents' layouts
-  into its own folder, and those sessions become items with `own` trust. Source names show
-  which device an item came from, and new devices start with disabled connectors, but
-  Jezero cannot tell a real session from a fabricated one.
+- **A device that lies, or an agent fooled on it.** An upload key can write any file that
+  fits its agents' layouts into its own folder, and those sessions become items with
+  `own` trust. Source names show which device an item came from, and new devices start
+  with disabled connectors, but Jezero cannot tell a real session from a fabricated one,
+  or a fact from one an agent was talked into writing. Scope the keys of privileged
+  agents to sources you trust.
 - **Secrets and personal data the redactor does not recognise.** See above.
 - **The summariser's provider.** It receives the redacted text of every session. If that
   is not acceptable, point `summarizer.base_url` at a model you run yourself.

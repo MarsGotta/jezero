@@ -19,12 +19,15 @@ from rich.text import Text
 from .. import client_core as core
 from .data import Backend, BackendError, DemoBackend, RemoteBackend, ago, source_agent
 from .look import AGENT_GLYPHS, NIGHT, chip, project_color, wordmark
+from .safe import CleanBackend
 
 P = NIGHT
 
 
 def _backend(args: argparse.Namespace) -> Backend:
-    return DemoBackend() if getattr(args, "demo", False) else RemoteBackend()
+    """The backend, with every string it returns cleaned of terminal control characters."""
+    inner = DemoBackend() if getattr(args, "demo", False) else RemoteBackend()
+    return CleanBackend(inner)  # type: ignore[return-value]
 
 
 def _console() -> Console:

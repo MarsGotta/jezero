@@ -328,8 +328,11 @@ home. Give each one its own key, inside its config folder, so it needs nothing e
    You should see:
 
    ```text
-   codex: MCP server jezero added to config.toml (stdio bridge; key in /home/me/agents/billing/codex/jezero)
+   codex: MCP server jezero added to config.toml (stdio bridge; key in /home/me/agents/billing/codex/jezero) (previous file: /home/me/agents/billing/codex/config.toml.bak-20261022T101500)
    ```
+
+   The `(previous file: ...)` part only appears when `config.toml` already existed: it
+   names the copy of the file as it was before.
 
    The block it writes names the key's folder, since Codex passes few variables to MCP
    servers:
@@ -376,10 +379,12 @@ python3 ~/.jezero-src/jezero-client/jezero_client.py flush
 You should see:
 
 ```text
-{"sent": 1, "unchanged": 0, "gone": 0, "failed": 0, "rejected": 0}
+{"sent": 1, "unchanged": 0, "gone": 0, "failed": 0, "rejected": 0, "waiting": 0}
 ```
 
-`gone` counts sessions whose file was deleted before it was sent. When `failed` is not 0,
+`gone` counts sessions whose file was deleted before it was sent. `waiting` counts
+queued files that are not the agent's own session files (for example a symbolic link):
+they are never sent, stay queued, and `client.log` says why. When `failed` is not 0,
 read `client.log` in the client home. Both `status` and `flush` take `--agent NAME` to
 use the key and queue of that agent (see [Where the key lives](#where-the-key-lives)).
 
@@ -399,6 +404,15 @@ Without `--agent` it queues Claude Code and Codex sessions. Repeat `--agent` for
 `hermes` and `antigravity` work too, `opencode` does not (its sessions only arrive through
 the plugin). `--days` defaults to 90. Each agent's sessions go to the queue of the key
 that agent uses.
+
+Sessions queued before an upgrade of the client are sent after it. Client 0.5.1 did not
+record the agent's session folder with each queued session, so client 0.5.3 takes it from
+the file's own path (the `projects` folder above a Claude Code session, the `sessions`
+folder above a Codex rollout): a `flush` from a plain terminal, without
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME`, sends them too. Client 0.5.2 could list such
+sessions as rejected (`not inside claude-code's session folder`); the next flush of 0.5.3
+queues them again and sends them. See
+[Upgrading from client 0.5.1 or 0.5.2](../reference/client.md#upgrading-from-client-051-or-052).
 
 ### When the server says no
 

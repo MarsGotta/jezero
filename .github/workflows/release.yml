@@ -2,7 +2,15 @@ name: release
 
 # Publishes Jezero to PyPI when a version tag (v0.1.0, v0.2.0rc1...) is pushed, with PyPI
 # Trusted Publishing (OIDC): no API token is stored anywhere. The tag must equal
-# `v` + jezero.__version__. A manual run (workflow_dispatch) publishes to TestPyPI only.
+# `v` + jezero.__version__ and point at a commit that is on main. A manual run
+# (workflow_dispatch, from main) publishes to TestPyPI only.
+#
+# Supply chain: every action is pinned to a full commit SHA; uv, twine and the build backend
+# (.github/build-constraints.txt, with hashes) are pinned to exact versions; no cache. The
+# GitHub release carries SHA256SUMS for the wheel, the sdist and the client bundle, and a
+# signed build provenance attestation for each of them
+# (`gh attestation verify FILE --repo MarsGotta/jezero`). id-token is granted only to the
+# jobs that publish or sign; they download the built files and run no repository code.
 # No untrusted input from the event reaches a shell: the tag goes through env vars.
 on:
   push:
@@ -16,9 +24,16 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  UV_VERSION: "0.13.5"
+
 jobs:
   test:
+    name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     strategy:
       matrix:
         python: ["3.12", "3.13", "3.14"]
@@ -28,28 +43,46 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
+          version: ${{ env.UV_VERSION }}
           enable-cache: false # no cache in a publishing workflow
-      - run: uv sync --locked --python ${{ matrix.python }}
-      - run: uv run --python ${{ matrix.python }} pytest
+      - name: Tests
+        env:
+          PYTHON: ${{ matrix.python }}
+        run: |
+          uv sync --locked --python "$PYTHON"
+          uv run --locked --python "$PYTHON" pytest
       - if: matrix.python == '3.13'
         run: |
-          uv run ruff check src tests scripts clients
-          uv run ruff format --check src tests scripts clients
+          uv run --locked ruff check src tests scripts clients
+          uv run --locked ruff format --check src tests scripts clients
           python3 scripts/privacy_check.py --all
           python3 scripts/build_clients.py --check
-          uv run python scripts/make_reference.py --check
-          uv run python scripts/check_docs.py
+          uv run --locked python scripts/make_reference.py --check
+          uv run --locked python scripts/check_docs.py
 
   build:
+    name: Build and check the files
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+          fetch-depth: 0 # the whole history, to prove that the commit is on main
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
+          version: ${{ env.UV_VERSION }}
           enable-cache: false # no cache in a publishing workflow
+      - name: The commit is on main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "$GITHUB_SHA is not on main: only commits on main are released" >&2
+            exit 1
+          fi
       - name: The tag matches the package version
         if: github.event_name == 'push'
         env:
@@ -62,9 +95,13 @@ jobs:
           fi
           grep -q "^## $version " CHANGELOG.md || { echo "CHANGELOG.md has no '## $version' section" >&2; exit 1; }
       # Its own folder: scripts/build_clients.py also writes to dist/, and everything in
-      # the folder handed to the publish action is uploaded to PyPI.
-      - run: uv build --out-dir pypi-dist
-      - run: uvx twine check --strict pypi-dist/*
+      # the folder handed to the publish action is uploaded to PyPI. The build backend and
+      # its dependencies come from a constraints file with hashes.
+      - name: Build the sdist and the wheel with the pinned backend
+        run: |
+          uv build --out-dir pypi-dist \
+            --build-constraints .github/build-constraints.txt --require-hashes
+      - run: uvx twine==7.0.0 check --strict pypi-dist/*
       - name: Smoke test the wheel in a clean environment
         run: |
           uv venv /tmp/smoke --python 3.13
@@ -79,6 +116,14 @@ jobs:
           /tmp/smoke/bin/python -c "import jezero.server, jezero.ui.app"
       - name: Client bundle for servers installed from PyPI
         run: python3 scripts/build_clients.py
+      - name: SHA256SUMS for the wheel, the sdist and the client bundle
+        run: |
+          mkdir release-assets
+          cp pypi-dist/* dist/jezero-client.tar.gz release-assets/
+          cd release-assets
+          sha256sum -- * > "$RUNNER_TEMP/SHA256SUMS"
+          mv "$RUNNER_TEMP/SHA256SUMS" SHA256SUMS
+          cat SHA256SUMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pypi-dist
@@ -86,14 +131,37 @@ jobs:
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: client-bundle
-          path: dist/jezero-client.tar.gz
+          name: release-assets
+          path: release-assets/
           if-no-files-found: error
 
-  publish-pypi:
+  attest:
+    name: Attest build provenance
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write # a Sigstore signing certificate for the attestations
+      attestations: write # store the attestations in the repository
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-assets
+          path: release-assets/
+      - name: The files match SHA256SUMS
+        working-directory: release-assets
+        run: sha256sum --check --strict SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: release-assets/SHA256SUMS
+
+  publish-pypi:
+    name: Publish to PyPI
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: pypi
       url: https://pypi.org/project/jezero/
@@ -107,14 +175,16 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
   publish-testpypi:
+    name: Publish to TestPyPI
     if: github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: testpypi
       url: https://test.pypi.org/project/jezero/
     permissions:
-      id-token: write
+      id-token: write # Trusted Publishing
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -125,18 +195,23 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
 
   github-release:
-    needs: publish-pypi
+    name: GitHub release
+    needs: [publish-pypi, attest]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
-      contents: write
+      contents: write # create the release and upload its files
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
+          name: release-assets
           path: assets/
-          merge-multiple: true
+      - name: The files match SHA256SUMS
+        working-directory: assets
+        run: sha256sum --check --strict SHA256SUMS
       - name: Release with the CHANGELOG section and the files
         env:
           GH_TOKEN: ${{ github.token }}

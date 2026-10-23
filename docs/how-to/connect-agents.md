@@ -193,8 +193,11 @@ local bridge, so Codex's `config.toml` never holds the key.
    You should see:
 
    ```text
-   codex: MCP server jezero added to config.toml (stdio bridge; key in /home/me/.jezero)
+   codex: MCP server jezero added to config.toml (stdio bridge; key in /home/me/.jezero) (previous file: /home/me/.codex/config.toml.bak-20261022T101500)
    ```
+
+   The part in the second pair of brackets only appears when `config.toml` already
+   existed: it names the copy of the file as it was before.
 
    It adds this block to `config.toml` in `CODEX_HOME` (default `~/.codex`) and leaves
    the rest of the file as it was:
@@ -207,13 +210,17 @@ local bridge, so Codex's `config.toml` never holds the key.
 
    With the key outside `~/.jezero`, the block also gets
    `env = { JEZERO_CLIENT_HOME = "..." }`. Line endings stay as they were (LF or CRLF),
-   and the previous file is kept next to it as `config.toml.bak-<time>`.
+   and the previous file is kept next to it as `config.toml.bak-<time>`. A
+   `config.toml` that is a symbolic link (a dotfiles setup) stays a link: the file it
+   points to gets the block.
 
    An old block with `url`, `http_headers` or `bearer_token`, written by an older client
-   with the key in clear, is replaced with its sub-tables: `codex: replaced the old
-   jezero entry in config.toml (it held the key in clear) with the stdio bridge. The
-   previous file, ..., still holds the key: ...`. Delete that backup once Codex works,
-   and [rotate the key](devices.md#rotate-a-key).
+   with the key in clear, is updated in place: `codex: replaced the old jezero entry in
+   config.toml (it held the key in clear) with the stdio bridge. The previous file, ...,
+   still holds the key: ...`. Its connection keys and their sub-tables go; its comments,
+   other settings and the `[mcp_servers.jezero.tools.*]` tables with your tool approvals
+   stay. Delete that backup once Codex works, and
+   [rotate the key](devices.md#rotate-a-key).
 
    If `config.toml` defines `jezero` in another form, such as `jezero = { url = ... }`
    under `[mcp_servers]` or `mcp_servers.jezero.url = ...`, `setup` changes nothing and

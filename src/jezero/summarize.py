@@ -18,7 +18,7 @@ from typing import Any
 import httpx
 
 from .config import SummarizerConfig
-from .models import ATOM_KINDS, Atom
+from .models import ATOM_KINDS, Atom, clean_display
 
 MAX_TITLE_CHARS = 200
 """Titles are cut here; the prompt asks for much shorter ones."""
@@ -367,9 +367,11 @@ def _parse(data: dict[str, Any]) -> Summary:
 
 def _clean_strings(value: Any) -> Any:
     """Replace lone UTF-16 surrogates (an emoji cut in two, escaped as `\\ud83d`), which
-    SQLite cannot store, in every string of the answer."""
+    SQLite cannot store, and drop terminal control characters and escape sequences (the
+    model may copy them from a transcript: `ESC ] 52` would set the clipboard of whoever
+    prints the item), in every string of the answer."""
     if isinstance(value, str):
-        return _SURROGATE.sub("\ufffd", value)
+        return clean_display(_SURROGATE.sub("\ufffd", value))
     if isinstance(value, dict):
         return {k: _clean_strings(v) for k, v in value.items()}
     if isinstance(value, list):

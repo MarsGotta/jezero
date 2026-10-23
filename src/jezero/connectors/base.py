@@ -88,9 +88,12 @@ class Batch:
     again cannot succeed, and holding the cursor would re-read every newer unit forever."""
 
 
-TRANSIENT_ERRORS: tuple[type[BaseException], ...] = (OSError, sqlite3.OperationalError)
-"""Errors that may go away on the next run (a locked database, a network folder): they
-fail the run instead of skipping the unit, so the cursor stays and the unit is read again."""
+TRANSIENT_ERRORS: tuple[type[BaseException], ...] = (OSError, sqlite3.DatabaseError, MemoryError)
+"""Errors that may go away on the next run: they fail the run instead of skipping the unit,
+so the cursor stays and the unit is read again. That covers a network folder, a locked
+database, and a damaged one (`sqlite3.DatabaseError`, the parent of `OperationalError`:
+`database disk image is malformed` is the store, not the session, and the session must be
+read again once the file is repaired), and running out of memory."""
 
 
 def read_or_skip[T](

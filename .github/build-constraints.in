@@ -1,0 +1,6 @@
+# Build backend for the release (pyproject.toml [build-system] allows ranges; the release
+# uses exactly these). Regenerate .github/build-constraints.txt after changing a pin:
+#   uv pip compile .github/build-constraints.in --generate-hashes --universal \
+#     --python-version 3.12 --no-header -o .github/build-constraints.txt
+hatchling==1.32.4
+hatch-fancy-pypi-readme==25.1.0

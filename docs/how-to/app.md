@@ -23,8 +23,11 @@ No server yet? Every view works on made-up data with `jezero ui --demo`.
 1. Install the `jezero` command:
 
    ```bash
-   uv tool install git+https://github.com/MarsGotta/jezero
+   uv tool install jezero
    ```
+
+   To run the newest code from `main` instead of the release, install from the
+   repository: `uv tool install git+https://github.com/MarsGotta/jezero`.
 
 2. If this computer has no key yet, create one and ask the server's admin to approve it:
 
@@ -103,7 +106,19 @@ included.
 - **Reinstall** repeats the setup.
 
 Every button first shows the exact command it will run and changes nothing until you
-confirm. The commands are the ones in [Connect an agent](connect-agents.md).
+confirm. The commands are the ones in [Connect an agent](connect-agents.md), pinned to
+the app's release:
+
+| Agent | Where a released app installs from |
+|---|---|
+| Claude Code | `MarsGotta/jezero#vVERSION`. An update removes the `jezero` marketplace and adds it again at the new tag, because Claude Code cannot move a marketplace to another tag. |
+| Codex | `MarsGotta/jezero@vVERSION`, removed and added again on update for the same reason. |
+| Antigravity | `https://github.com/MarsGotta/jezero/tree/vVERSION/plugins/antigravity` |
+| OpenCode | The plugin inside the installed package. |
+| Hermes Agent | `main`: Hermes pins a plugin only to a commit SHA, which the app does not know. |
+
+`VERSION` is the app's own version (`jezero --version`). An app installed from the
+repository (a `dev` version) installs every plugin from `main`.
 
 <p align="center">
   <img src="../app/agents.svg" width="100%"

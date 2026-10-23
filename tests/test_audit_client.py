@@ -108,7 +108,7 @@ def mode(path: Path) -> int:
 
 
 def test_version_is_bumped(tmp_path, monkeypatch) -> None:
-    assert load_core(tmp_path / "jz", monkeypatch).VERSION == "0.5.2"
+    assert load_core(tmp_path / "jz", monkeypatch).VERSION == "0.5.3"
 
 
 # ------------------------------------------------- 1. redirects and plain HTTP
@@ -197,7 +197,7 @@ def test_insecure_http_flag(tmp_path, monkeypatch, capsys) -> None:
 # ----------------------------------------- 2. one bad file never stops the queue
 
 
-def test_project_header_is_ascii_only(make_stub, tmp_path, monkeypatch) -> None:
+def test_project_header_ascii_as_is_unicode_encoded(make_stub, tmp_path, monkeypatch) -> None:
     url, handler = make_stub()
     core = load_core(tmp_path / "jz", monkeypatch)
     configure(core, url)
@@ -207,7 +207,8 @@ def test_project_header_is_ascii_only(make_stub, tmp_path, monkeypatch) -> None:
         pointer.write_text(json.dumps({**json.loads(pointer.read_text()), "project": project}))
     assert core.flush(core.load_config())["sent"] == 3
     projects = [r["headers"].get("X-Jezero-Project") for r in handler.seen]
-    assert projects == [None, "billing", None]
+    # 0.5.3: a name with letters beyond ASCII goes percent-encoded (UTF-8, NFC).
+    assert projects == ["proyecto-%C3%B1and%C3%BA", "billing", None]
     assert "not sent" in core.LOG.read_text()
 
 
@@ -240,10 +241,10 @@ def test_unexpected_error_rejects_one_file_and_goes_on(make_stub, tmp_path, monk
     core.enqueue("claude-code", "b", str(second), "/w")
     real = core.upload
 
-    def flaky(cfg, agent, path, project=None, roots=None):  # noqa: ANN001
+    def flaky(cfg, agent, path, project=None, roots=None, sent=None):  # noqa: ANN001
         if path == first:
             raise UnicodeEncodeError("latin-1", "ñ", 0, 1, "ordinal not in range")
-        return real(cfg, agent, path, project, roots)
+        return real(cfg, agent, path, project, roots, sent)
 
     monkeypatch.setattr(core, "upload", flaky)
     counts = core.flush(core.load_config())
@@ -346,8 +347,12 @@ def test_symlinks_and_outside_files_are_never_uploaded(make_stub, tmp_path, monk
     assert core.enqueue("claude-code", "real", str(real), "/w")
     real.unlink()
     real.symlink_to(secret)
-    assert core.flush(core.load_config())["rejected"] == 1
+    # 0.5.3: never sent, and not the server's verdict: it waits in the queue instead of
+    # being marked rejected for good.
+    counts = core.flush(core.load_config())
+    assert counts["waiting"] == 1 and counts["rejected"] == 0
     assert handler.seen == []
+    assert str(real) not in json.loads(core.STATE.read_text()).get("rejected", {})
 
 
 def test_store_reached_through_a_symlink_still_works(make_stub, tmp_path, monkeypatch):

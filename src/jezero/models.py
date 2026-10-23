@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
@@ -116,6 +117,42 @@ def content_hash(text: str) -> str:
     # `surrogatepass`: a lone surrogate (half an emoji, JSON-escaped) must not make the
     # hash raise. Valid text hashes exactly as before.
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+# Terminal control sequences: OSC (title, clipboard `OSC 52`, hyperlinks `OSC 8`), DCS, SOS,
+# PM and APC strings up to their terminator (BEL or ST); CSI sequences (colours, cursor
+# moves, `ESC [ 2 J`); other ESC sequences; and their 8-bit C1 forms. Each class excludes its
+# own terminators, so a scan never backtracks.
+_CONTROL_STRING = re.compile(
+    r"(?:\x1b[\]PX^_]|[\x90\x98\x9d\x9e\x9f])[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)"
+)
+_CSI = re.compile(r"(?:\x1b\[|\x9b)[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]")
+_ESCAPE = re.compile(r"\x1b[\x20-\x2f]*[\x30-\x7e]?")
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def clean_display(text: str) -> str:
+    """`text` without terminal control characters: C0 controls except newline and tab, DEL
+    and C1 (0x80-0x9f). Escape sequences go whole (`ESC ] 52 ; c ; ... BEL` leaves nothing),
+    so a stored title or summary cannot set the clipboard, open links or move the cursor of
+    the terminal that prints it."""
+    if not _CONTROL.search(text):
+        return text
+    text = _CONTROL_STRING.sub("", text)
+    text = _CSI.sub("", text)
+    text = _ESCAPE.sub("", text)
+    return _CONTROL.sub("", text)
+
+
+def clean_tree[T](value: T) -> T:
+    """`clean_display` on every string of a JSON-like value (dicts, lists, tuples)."""
+    if isinstance(value, str):
+        return clean_display(value)  # type: ignore[return-value]
+    if isinstance(value, dict):
+        return {k: clean_tree(v) for k, v in value.items()}  # type: ignore[return-value]
+    if isinstance(value, list | tuple):
+        return type(value)(clean_tree(v) for v in value)  # type: ignore[return-value]
+    return value
 
 
 def atoms_from_json(raw: str | None) -> list[Atom]:

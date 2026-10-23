@@ -416,7 +416,11 @@ def open_text(path: Path) -> BoundedLines:
     if path.suffix == ".zst":
         import zstandard
 
-        raw = zstandard.ZstdDecompressor().stream_reader(raw, closefd=True)  # type: ignore[assignment]
+        # A rollout may hold several frames (one per flush): read them all, as the inbox
+        # check does, not only the first.
+        raw = zstandard.ZstdDecompressor().stream_reader(  # type: ignore[assignment]
+            raw, closefd=True, read_across_frames=True
+        )
     return BoundedLines(raw, path, max_line=MAX_LINE_BYTES, max_total=MAX_ROLLOUT_BYTES)
 
 

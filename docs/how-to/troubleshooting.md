@@ -156,14 +156,15 @@ settings, as does any MCP client you configured with a URL.
 ### The bundle download fails with 404
 
 **What you see.** `curl` on `https://YOUR-JEZERO/client/jezero-client.tar.gz` gets 404,
-with `{"ok":false,"error":"no client bundle built: run python3 scripts/build_clients.py on
-the server to build it"}`. The server's log warned about it at start: `client bundle not
-found at ...`.
+with `{"ok":false,"error":"no client bundle built: run python3 scripts/build_clients.py in
+a checkout, or download jezero-client.tar.gz from the GitHub release of this version"}`.
+The server's log warned about it at start: `client bundle not found at ...`.
 
-**Why.** The server offers the bundle only after it has been built.
+**Why.** The server offers the bundle only once the file named by `server.client_bundle`
+exists: built in a checkout, or downloaded when Jezero was installed from PyPI.
 
-**Fix.** Build it on the server: see [Serve the plugin
-bundle](deploy.md#serve-the-plugin-bundle).
+**Fix.** On the server, build it (checkout) or download and verify the release's bundle
+(PyPI): see [Serve the plugin bundle](deploy.md#serve-the-plugin-bundle).
 
 ## Server
 

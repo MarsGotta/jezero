@@ -101,8 +101,10 @@ The same steps apply to every scheduled type.
    [segments](data-model.md#segments-of-long-sessions), one item each.
 5. **Redact, compare, summarise.** Secrets are redacted, in the text and in what goes to
    the summarizer with it (the title hint and the context values). A segment whose
-   redacted text has the same SHA-256 as the stored item is skipped as `unchanged`; the
-   others go to the summarizer and are inserted or updated. A segment the summarizer fails
+   redacted text has the same SHA-256 as the stored item is skipped as `unchanged` (if the
+   source now gives another `original_ref`, the stored one is updated, with no summarizer
+   call); the others go to the summarizer and are inserted or updated. Terminal control
+   characters are dropped from what the summarizer writes. A segment the summarizer fails
    on (an error, or an answer of the wrong shape) is counted in `failed`; the other
    segments of the run are still stored.
 6. **Prune.** When a unit is read again whole and no longer produces some of its stored
@@ -111,7 +113,10 @@ The same steps apply to every scheduled type.
    and a unit the source stops producing altogether is kept.
 7. **Advance.** The cursor moves only when every segment was stored and the connector
    reported no warning. Otherwise the same units are read again next run, and the error is
-   kept in the connector's state for `jezero health`.
+   kept in the connector's state for `jezero health`, redacted like the text (and with the
+   summarizer's API key replaced). A source that cannot be read for now (a locked or
+   damaged database, a missing network folder, no memory left) fails the run and keeps the
+   cursor; a unit that is itself malformed is skipped and reported.
 
 `--limit N` processes at most N units, oldest first, and more when the Nth unit shares its
 timestamp with the next ones: the whole group is taken, because the next run only reads
@@ -221,7 +226,8 @@ skip_project_dirs = ["-tmp-*"]
 ## codex
 
 OpenAI Codex CLI sessions. Codex writes one JSON Lines "rollout" per session under
-`sessions/YYYY/MM/DD/`; newer builds compress them (`.jsonl.zst`).
+`sessions/YYYY/MM/DD/`; newer builds compress them (`.jsonl.zst`, read across all the
+zstd frames of the file).
 
 - **Unit:** one `*.jsonl` or `*.jsonl.zst` file, found recursively under `sessions_dir`.
   Cursor: the file's modification time.
@@ -468,7 +474,7 @@ seconds.
 | Item field | Value |
 |---|---|
 | `external_id` | `<identifier>#<n>`: `0` for the segment that starts with the header, else the position of its first entry |
-| `original_ref` | `paperclip-issue:<company id>/<identifier>`. Items stored before this form keep `paperclip-issue:<identifier>` until their segment changes. |
+| `original_ref` | `paperclip-issue:<company id>/<identifier>`. Items stored with the older `paperclip-issue:<identifier>` get the new form the next time their issue is read, with no summarizer call: `jezero connector reset` and a run update them all. |
 | `occurred_at` | the latest time among the segment's entries |
 | `project` | `project_map[<project name>]`, renamed by the aliases, else the connector's `project`, else the summarizer's guess |
 

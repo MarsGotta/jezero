@@ -157,7 +157,9 @@ config folder to make another, or a session read both on the server and from a d
 inbox. Both items share `original_ref` and `external_id` (the same segment of the same
 original), so `search`, `later` and `timeline` show only the best-ranked copy, and a
 result list does not spend two places on one answer. A client that can read only one of
-the sources still sees its copy.
+the sources still sees its copy. When a connector changes how it names originals (Paperclip
+refs gained the company id), a reset and a run bring the older items to the new
+`original_ref` without new summaries, so copies are told apart the same way again.
 
 ## Limits and filters
 

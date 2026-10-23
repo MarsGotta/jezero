@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -38,6 +39,9 @@ class RunReport:
     output_tokens: int = 0
     pruned: int = 0
     """Stored segments removed because their session no longer produces them."""
+    refs_updated: int = 0
+    """Unchanged items whose `original_ref` the source now gives differently (a new ref
+    format): updated in place, without summarising them again."""
     dry_run: bool = False
     sample: bool = False
     note: str | None = None
@@ -47,6 +51,8 @@ class RunReport:
     def to_dict(self) -> dict[str, object]:
         data = asdict(self)
         data["errors"] = self.errors[:5]
+        if not self.refs_updated:
+            del data["refs_updated"]  # only shown when it happened, as after a ref change
         return data
 
 
@@ -101,6 +107,7 @@ async def run_connector(
 
     failed_ids: set[str] = set()
     pending: list[tuple[RawDoc, str, str]] = []
+    refs: list[tuple[str, str]] = []
     for doc in batch.docs:
         try:
             text = _prepare(doc, redactor, report)
@@ -111,6 +118,8 @@ async def run_connector(
             continue
         if known:
             report.unchanged += 1
+            if doc.original_ref:
+                refs.append((doc.external_id, doc.original_ref))
             continue
         report.input_chars += len(text)
         pending.append((doc, text, digest))
@@ -122,8 +131,13 @@ async def run_connector(
             else ""
         )
     if dry_run:
+        _scrub_report(report, config, redactor)
         return report
 
+    try:
+        report.refs_updated = _refresh_refs(store, conn.name, refs)
+    except Exception as exc:  # noqa: BLE001 - a ref left as it was is no reason to stop
+        report.warnings.append(f"original_ref not updated: {type(exc).__name__}: {exc}")
     if pending:
         summarizer = summarizer or Summarizer(
             config.summarizer, known_projects=config.summarizer.known_projects
@@ -134,6 +148,7 @@ async def run_connector(
         report.input_tokens = summarizer.usage.input_tokens
         report.output_tokens = summarizer.usage.output_tokens
     report.pruned = _prune_stale_segments(store, conn.name, batch.docs, failed_ids)
+    _scrub_report(report, config, redactor)
     if sample is not None:
         return report  # a pilot: cursor, last run and last success stay untouched
 
@@ -153,6 +168,57 @@ async def run_connector(
         )
     )
     return report
+
+
+def _refresh_refs(store: Store, source: str, refs: list[tuple[str, str]]) -> int:
+    """Set `original_ref` of stored items whose text is unchanged but whose source now
+    gives another ref (Paperclip went from `paperclip-issue:ACME-1` to
+    `paperclip-issue:<company>/ACME-1`). No summary is made again. Returns how many changed.
+
+    The store has no method for this one column, so the UPDATE is done here on the store's
+    own connection; the search index does not hold `original_ref` and needs no change.
+    """
+    if not refs:
+        return 0
+    con = store.connect()
+    changed = 0
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        for external_id, ref in refs:
+            cur = con.execute(
+                "UPDATE items SET original_ref = ? "
+                "WHERE source = ? AND external_id = ? AND original_ref IS NOT ?",
+                (ref, source, external_id, ref),
+            )
+            changed += max(cur.rowcount, 0)
+        con.execute("COMMIT")
+    except BaseException:
+        if con.in_transaction:
+            con.execute("ROLLBACK")
+        raise
+    finally:
+        con.close()
+    return changed
+
+
+def scrub_error(text: str, config: Config, redactor: Redactor | None = None) -> str:
+    """`text` (an error to print or store as `last_error`) without secrets: the redaction
+    rules, then the summarizer's API key itself, which a provider or a proxy may echo back
+    in its error message whatever its shape."""
+    redactor = redactor or Redactor(
+        config.redaction.extra_patterns, enabled=config.redaction.enabled
+    )
+    text = redactor.redact(text).text
+    key = os.environ.get(config.summarizer.api_key_env) or ""
+    key = key.strip()
+    if len(key) >= 8 and key in text:  # shorter values are too likely ordinary text
+        text = text.replace(key, "[REDACTED:summarizer_api_key]")
+    return text
+
+
+def _scrub_report(report: RunReport, config: Config, redactor: Redactor) -> None:
+    report.errors = [scrub_error(e, config, redactor) for e in report.errors]
+    report.warnings = [scrub_error(w, config, redactor) for w in report.warnings]
 
 
 def _clean(text: str) -> str:
@@ -319,6 +385,8 @@ async def resummarize_items(
                 )
             )
         report.stored += sum(1 for o in store.upsert_many(fresh, force=True) if o == "updated")
+    redactor = Redactor(config.redaction.extra_patterns, enabled=config.redaction.enabled)
+    _scrub_report(report, config, redactor)
     report.input_tokens = summarizer.usage.input_tokens
     report.output_tokens = summarizer.usage.output_tokens
     return report

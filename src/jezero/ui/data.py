@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
+from .. import __version__
 from .. import client_core as core
 
 AGENT_NAMES = {
@@ -36,7 +37,32 @@ AGENT_BINARIES = {
     "antigravity": "agy",
 }
 REPO = "MarsGotta/jezero"
-AGY_URL = f"https://github.com/{REPO}/tree/main/plugins/antigravity"
+
+
+def release_ref(version: str = __version__) -> str | None:
+    """The git tag of a release (`v0.1.0`, `v0.2.0rc1`), or None for a dev or local build.
+
+    A released app installs the plugins from its own tag, so it never pulls whatever is on
+    `main` at that moment; a dev build has no tag and follows `main`.
+    """
+    if re.fullmatch(r"\d+(\.\d+)*((a|b|rc)\d+)?(\.post\d+)?", version):
+        return f"v{version}"
+    return None
+
+
+REF = release_ref()
+"""Where the plugins come from: this version's tag, or None for `main` (dev builds).
+
+Claude Code (`OWNER/REPO#TAG`), Codex (`OWNER/REPO@TAG`) and Antigravity (`tree/TAG/...`)
+take the tag. Hermes Agent pins only to a 40-character commit SHA (`--ref`), which the app
+cannot know offline, so it always installs from `main`."""
+
+
+def agy_url(ref: str | None = None) -> str:
+    return f"https://github.com/{REPO}/tree/{ref or 'main'}/plugins/antigravity"
+
+
+AGY_URL = agy_url(REF)
 _HERE = Path(__file__).resolve().parent.parent
 OPENCODE_PLUGIN = next(
     (
@@ -82,6 +108,23 @@ class AgentStatus:
         They are the ones in docs/how-to/connect-agents.md."""
         setup = [sys.executable, str(Path(core.__file__)), "setup", "--agent", self.agent]
         update = self.installed
+        ref = REF
+        if self.agent in ("claude-code", "codex") and ref:
+            # A marketplace pinned to a tag cannot be moved to another source or tag in place
+            # (both CLIs refuse to add one that exists with another source): remove it, add
+            # it at this version's tag, install the plugin again. Removing it fails
+            # harmlessly when it is not there.
+            cli, source, install = (
+                ("claude", f"{REPO}#{ref}", "install")
+                if self.agent == "claude-code"
+                else ("codex", f"{REPO}@{ref}", "add")
+            )
+            return [
+                ([cli, "plugin", "marketplace", "remove", "jezero"], True),
+                ([cli, "plugin", "marketplace", "add", source], False),
+                ([cli, "plugin", install, "jezero@jezero"], False),
+                *([] if update else [(setup, False)]),
+            ]
         if self.agent == "claude-code":
             if update:
                 return [
@@ -107,10 +150,11 @@ class AgentStatus:
         if self.agent == "opencode":
             return [([*setup, "--opencode-plugin", str(OPENCODE_PLUGIN)], False)]
         if self.agent == "hermes":
+            # Always `main`: see REF.
             if update:
                 return [(["hermes", "plugins", "update", "jezero"], False)]
             return [(["hermes", "plugins", "install", f"{REPO}/plugins/hermes", "--enable"], False)]
-        return [(["agy", "plugin", "install", AGY_URL], False)]
+        return [(["agy", "plugin", "install", agy_url(ref)], False)]
 
     @property
     def install_command(self) -> list[str]:

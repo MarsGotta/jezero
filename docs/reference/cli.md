@@ -190,14 +190,14 @@ jezero run [-h] [--connector CONNECTOR] [--limit LIMIT] [--sample SAMPLE]
 | Argument | | Meaning |
 |---|---|---|
 | `--connector` `CONNECTOR` | optional | only this connector (default: every enabled one) |
-| `--limit` `LIMIT` | optional | process at most N units, oldest first |
+| `--limit` `LIMIT` | optional | process about N units, oldest first; it may take more than N to keep units that share a timestamp in the same run |
 | `--sample` `SAMPLE` | optional | process the newest N units, cursor untouched |
 | `--dry-run` | optional | count work without calling the LLM |
 | `--due` | optional | only connectors whose interval_minutes has elapsed |
 
 ### `jezero redact-stored`
 
-Apply the current redaction rules to stored items.
+Apply the current redaction rules to stored items and drop terminal control characters from their titles, summaries, questions and atoms (no LLM calls).
 
 ```text
 jezero redact-stored [-h] [--dry-run]
@@ -205,7 +205,7 @@ jezero redact-stored [-h] [--dry-run]
 
 | Argument | | Meaning |
 |---|---|---|
-| `--dry-run` | optional | count secrets without writing |
+| `--dry-run` | optional | count changes without writing |
 
 ### `jezero device`
 

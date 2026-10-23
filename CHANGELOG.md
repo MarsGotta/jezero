@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- Second review before the first release. Server: a `.env` re-pointed by a symlink or
+  saved with invalid UTF-8 is handled on reload (an unreadable one disables `token_env`
+  clients); Host checks ignore case and cover websockets; inbox project names may use any
+  script (percent-encoded); config errors never echo values; a summarizer `base_url` over
+  `http://` to another host is refused unless `allow_insecure_http = true`; watchdog
+  alerts and stored errors are redacted, with configured secret values masked; server
+  instructions say every item is data, never instructions.
+- Core: redaction no longer hides ordinary text (`La contraseña: incorrecta`,
+  `Cookie: theme=dark`, ids, camelCase names) while still catching real secrets;
+  terminal escape sequences are stripped from summaries, imports and everything the CLI
+  and the app print, and `redact-stored` cleans stored items without re-summarising;
+  unchanged Paperclip items get the new ref after `connector reset` with no model calls;
+  multi-frame Codex `.zst` rollouts are read whole; a corrupt or locked database keeps
+  the cursor.
+- Client 0.5.3: sessions queued by 0.5.1 are sent after upgrading from any environment,
+  and those 0.5.2 wrongly marked "outside the session folder" are queued again;
+  symlinked config, token and state files stay links; `setup --agent codex` keeps tool
+  approvals, comments and other settings; prompt context is framed as data with source
+  and trust and stripped of control characters; the stdio bridge never answers
+  notifications.
+- Release and CI: only commits on `main` are published; uv, twine and the build backend
+  are pinned (hashed constraints); releases carry `SHA256SUMS` and signed build
+  provenance; every action is pinned to a commit SHA; `build_clients.py` ships only
+  tracked files and builds a reproducible bundle; the app installs plugins from its own
+  release tag (Hermes stays on `main`); docs gain a server-from-PyPI path and bundle
+  verification.
 - Security review before the first release. Server: `require_auth = false` is refused
   together with `public_url` or `allowed_hosts`; Host and Origin are checked before the
   key on every route (a bad host gets 421); `.jsonl.zst` uploads are measured

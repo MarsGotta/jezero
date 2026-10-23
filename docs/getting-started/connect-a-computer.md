@@ -12,8 +12,8 @@ You need:
   `require_auth = true`. [Run Jezero as a service](../how-to/deploy.md) sets one up,
   including [the address other computers
   use](../how-to/deploy.md#reach-it-from-other-computers).
-  The server is a checkout of the repository, as in [Your first library](tutorial.md);
-  server commands run in that folder (`~/jezero` below).
+  Server commands run in its folder (`~/jezero` below), a checkout of the repository as
+  in [Your first library](tutorial.md) or the folder of a server installed from PyPI.
 - An API key for the [summarizer](../glossary.md#summarizer) model, used in step 8.
 - A laptop with `python3` (3.9 or newer), `curl` and
   [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
@@ -34,7 +34,13 @@ You should see:
 
 ```text
 built /home/me/jezero/dist/client, /home/me/jezero/dist/jezero-client.tar.gz and plugins/ (version 0.5.2)
+sha256 SHA256  jezero-client.tar.gz
 ```
+
+> [!NOTE]
+> A server installed from PyPI has no `scripts/` folder: download and check the bundle of
+> its version from the GitHub release instead, as in [Serve the plugin
+> bundle](../how-to/deploy.md#serve-the-plugin-bundle).
 
 The server offers the file at `/client/jezero-client.tar.gz` without a key: it is the same
 public code as the repository. See [Serve the plugin
@@ -150,7 +156,7 @@ You should see:
 
 ```text
 key: /home/me/.jezero
-server https://YOUR-JEZERO: HTTP 200 {"ok":true,"device":"laptop","version":"0.1.0.dev0"}
+server https://YOUR-JEZERO: HTTP 200 {"ok":true,"device":"laptop","version":"0.1.0"}
 queued sessions: 0
 rejected uploads: 0
 ```
@@ -351,7 +357,7 @@ To search from the laptop's terminal, install the `jezero` command there. It rea
 the laptop's key, so it sees the same sources as its agents:
 
 ```bash
-uv tool install git+https://github.com/MarsGotta/jezero
+uv tool install jezero
 jezero find WORDS
 ```
 
@@ -364,7 +370,9 @@ You should see:
 1 results · jezero show ID for the whole memory
 ```
 
-If `jezero` is not found, add `~/.local/bin` to your `PATH`. The laptop reads only
+If `jezero` is not found, add `~/.local/bin` to your `PATH`. To follow `main` instead of
+the release, install from the repository with
+`uv tool install git+https://github.com/MarsGotta/jezero`. The laptop reads only
 `agent-*` sources: if the server holds the `demo` items of the first tutorial, they do not
 appear here.
 

@@ -30,7 +30,11 @@ build/
 .vscode/
 pypi-dist/
 
-# Local leftovers that must never reach a package: config backups, caches, logs.
+# Local leftovers that must never reach a package: config backups and lock files, caches,
+# logs, editor backups and JavaScript dependencies.
 *.toml.bak-*
+.*.toml.lock
+*.bak
 .cache/
 *.log
+node_modules/

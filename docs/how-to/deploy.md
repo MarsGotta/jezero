@@ -6,17 +6,62 @@ install, the systemd units, the reverse proxy, the plugin bundle, backups and up
 
 ## Before you start
 
-- A Linux server with systemd, [git](https://git-scm.com) and
-  [uv](https://docs.astral.sh/uv/). uv brings Python 3.12 or newer; Jezero also needs
-  SQLite 3.45 or newer, which recent Python builds include.
+- A Linux server with systemd, [uv](https://docs.astral.sh/uv/) and `curl`. uv brings
+  Python 3.12 or newer; Jezero also needs SQLite 3.45 or newer, which recent Python
+  builds include. [git](https://git-scm.com) too if you install from a checkout.
 - An API key for the [summarizer](../explanation/summaries.md) model.
 - Ideally, a first library made with [the tutorial](../getting-started/tutorial.md), so
   the commands here are familiar.
 
 ## Install Jezero
 
-1. Clone the repository into `~/jezero` and install it. The systemd units expect this
-   folder; if you choose another one, you edit two paths later.
+Install the released package from PyPI, or run Jezero from a checkout of the repository.
+Both keep the config and the data in `~/jezero`, which the systemd units expect. A
+checkout builds the [plugin bundle](#serve-the-plugin-bundle) itself and follows `main`;
+the package downloads the bundle of its version from the GitHub release.
+
+### Server from PyPI
+
+1. Install the `jezero` command (in `~/.local/bin`):
+
+   ```bash
+   uv tool install jezero
+   jezero --version
+   ```
+
+   You should see:
+
+   ```text
+   jezero 0.1.0
+   ```
+
+   If `jezero` is not found, add `~/.local/bin` to your `PATH` (`uv tool update-shell`
+   does it).
+
+2. Create the folder for the config and the data, and download the example config and
+   the systemd units of your version from GitHub:
+
+   ```bash
+   mkdir -p ~/jezero/deploy/systemd
+   cd ~/jezero
+   v=$(jezero --version | awk '{print $2}')
+   curl -fsSL -o jezero.example.toml "https://raw.githubusercontent.com/MarsGotta/jezero/v$v/jezero.example.toml"
+   for unit in jezero-ingest.service jezero-ingest.timer jezero-serve.service; do curl -fsSL -o "deploy/systemd/$unit" "https://raw.githubusercontent.com/MarsGotta/jezero/v$v/deploy/systemd/$unit"; done
+   ```
+
+   The sample items and the sample evaluation file of the tutorial are in
+   [`examples/`](https://github.com/MarsGotta/jezero/tree/main/examples) on GitHub.
+
+3. Download the plugin bundle as described in [Serve the plugin
+   bundle](#serve-the-plugin-bundle).
+
+> [!NOTE]
+> With the package, run `jezero` where this page says `.venv/bin/jezero`.
+
+### Server from a checkout
+
+1. Clone the repository into `~/jezero` and install it. If you choose another folder,
+   you edit two paths later.
 
    ```bash
    git clone https://github.com/MarsGotta/jezero.git ~/jezero
@@ -30,25 +75,20 @@ install, the systemd units, the reverse proxy, the plugin bundle, backups and up
    .venv/bin/jezero --version
    ```
 
-   You should see:
+   You should see the version, for example:
 
    ```text
-   jezero 0.1.0.dev0
+   jezero 0.1.0
    ```
-
-A checkout is the recommended way on the server: it holds the
-[plugin bundle](#serve-the-plugin-bundle) sources and the systemd units.
-`uv tool install git+https://github.com/MarsGotta/jezero` also gives you a `jezero`
-command (in `~/.local/bin`), but without the checkout you cannot build the bundle, and you
-must point the units at that command and at your config yourself.
 
 ## Configure it
 
-1. Create the config from the example and adapt it: the summarizer, the
+1. In `~/jezero`, create the config from the example and adapt it: the summarizer, the
    [clients](../reference/configuration.md#clients) that may read, and the
    [sources](sources.md) to collect.
 
    ```bash
+   cd ~/jezero
    cp jezero.example.toml jezero.toml
    ```
 
@@ -123,8 +163,12 @@ Jezero runs as two systemd user units, in [`deploy/systemd`](../../deploy/system
    sed -i 's|%h/jezero|/home/me/src/jezero|g' ~/.config/systemd/user/jezero-*.service
    ```
 
-   With `uv tool install`, change each `ExecStart` to `%h/.local/bin/jezero ...` and keep
-   `WorkingDirectory` on the folder that holds `jezero.toml`.
+   With the package from PyPI, point each `ExecStart` at `~/.local/bin/jezero` and keep
+   `WorkingDirectory` on the folder that holds `jezero.toml`:
+
+   ```bash
+   sed -i 's|%h/jezero/.venv/bin/jezero|%h/.local/bin/jezero|' ~/.config/systemd/user/jezero-*.service
+   ```
 
 3. Start the timer and the server:
 
@@ -252,22 +296,82 @@ keys](devices.md).
 ## Serve the plugin bundle
 
 Computers install the plugins from a bundle that your server offers at
-`https://YOUR-JEZERO/client/jezero-client.tar.gz`, with no key (it is public code).
+`https://YOUR-JEZERO/client/jezero-client.tar.gz`, with no key (it is public code). The
+server reads the file named by
+[`server.client_bundle`](../reference/configuration.md#server), by default
+`dist/jezero-client.tar.gz` relative to the config's folder, on each request: a new file
+needs no restart.
 
-1. Build it in the checkout:
+**From PyPI**, download the bundle of your version and its checksums from the GitHub
+release, check them, and leave it where the default setting looks:
+
+```bash
+mkdir -p ~/jezero/dist
+cd ~/jezero/dist
+v=$(jezero --version | awk '{print $2}')
+curl -fsSLO "https://github.com/MarsGotta/jezero/releases/download/v$v/jezero-client.tar.gz"
+curl -fsSLO "https://github.com/MarsGotta/jezero/releases/download/v$v/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+```
+
+You should see:
+
+```text
+jezero-client.tar.gz: OK
+```
+
+To keep it somewhere else, name that file in `jezero.toml`:
+
+```toml
+[server]
+client_bundle = "/home/me/jezero-bundles/jezero-client.tar.gz"
+```
+
+**From a checkout**, build it:
+
+```bash
+cd ~/jezero
+python3 scripts/build_clients.py
+```
+
+It writes `dist/client/` and `dist/jezero-client.tar.gz`, and prints the bundle's SHA-256.
+It also refreshes the committed copy of the plugins (`plugins/` and the two
+`marketplace.json` files), which stays identical unless you changed `clients/`. It stops
+if `clients/` holds a file that git does not track, so a local `.env` or `node_modules`
+never reaches the bundle.
+
+### Verify the plugin bundle
+
+Every GitHub release carries `SHA256SUMS`, with the checksums of the wheel, the sdist and
+`jezero-client.tar.gz`, and a signed build provenance attestation for each of those files.
+The checksums catch a damaged or swapped download; the attestation also proves that the
+release workflow of `MarsGotta/jezero` built the file from the tagged commit.
+
+1. Check the checksum, in the folder that holds both files:
 
    ```bash
-   cd ~/jezero
-   python3 scripts/build_clients.py
+   sha256sum --check --ignore-missing SHA256SUMS
    ```
 
-   It writes `dist/client/` and `dist/jezero-client.tar.gz`. It also refreshes the
-   committed copy of the plugins (`plugins/` and the two `marketplace.json` files), which
-   stays identical unless you changed `clients/`.
+   You should see `jezero-client.tar.gz: OK`. Any other answer means the file is not the
+   one that was released: download it again and do not serve it.
 
-2. Leave [`server.client_bundle`](../reference/configuration.md#server) at its default,
-   `dist/jezero-client.tar.gz`, relative to the config's folder, or point it at another
-   file. The server reads the file on each request, so a rebuild needs no restart.
+2. With the [GitHub CLI](https://cli.github.com), check the attestation:
+
+   ```bash
+   gh attestation verify jezero-client.tar.gz --repo MarsGotta/jezero --signer-workflow MarsGotta/jezero/.github/workflows/release.yml
+   ```
+
+   You should see, among other lines:
+
+   ```text
+   ✓ Verification succeeded!
+   ```
+
+The same two checks work for the wheel and the sdist. `scripts/build_clients.py` builds
+the bundle reproducibly (sorted files, fixed owner and dates) and prints its SHA-256, so a
+checkout of the tag normally gives the release's checksum; another zlib version can still
+change the compressed bytes.
 
 ## Restart after configuration changes
 
@@ -359,7 +463,13 @@ again. Sessions newer than the backup's cursors are collected again on the next 
    release changes the schema, `jezero init` refuses the old database with `unsupported
    schema version` and you need the copy.
 
-2. Get the new code and its dependencies:
+2. Get the new version. From PyPI:
+
+   ```bash
+   uv tool upgrade jezero
+   ```
+
+   From a checkout:
 
    ```bash
    cd ~/jezero
@@ -371,16 +481,30 @@ again. Sessions newer than the backup's cursors are collected again on the next 
    Unknown keys are an error, so a renamed or removed key shows up here:
 
    ```bash
+   cd ~/jezero
    .venv/bin/jezero check-config
    ```
 
-4. Rebuild the plugin bundle, so new computers get the new plugins:
+4. If the CHANGELOG mentions new redaction rules, apply them to the items already
+   stored. Count first, then redact:
+
+   ```bash
+   .venv/bin/jezero redact-stored --dry-run
+   .venv/bin/jezero redact-stored
+   ```
+
+   You should see `would redact N secrets in M items`, then `redacted N secrets in M
+   items`. It rewrites the stored text, the kept original included, and cannot be undone.
+
+5. Update the plugin bundle, so new computers get the new plugins: download the new
+   version's bundle as in [Serve the plugin bundle](#serve-the-plugin-bundle) (PyPI), or
+   rebuild it (checkout):
 
    ```bash
    python3 scripts/build_clients.py
    ```
 
-5. Restart the server. The timer picks up the new code on its next run by itself.
+6. Restart the server. The timer picks up the new code on its next run by itself.
 
    ```bash
    systemctl --user restart jezero-serve.service
