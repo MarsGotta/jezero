@@ -83,6 +83,9 @@ def test_detect_agents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for var in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("JEZERO_CLIENT_HOME", str(tmp_path / "jz"))
+    # The plans below are those of a dev build (plugins from `main`); a release build
+    # installs from its tag, covered in test_review2_release.py.
+    monkeypatch.setattr("jezero.ui.data.REF", None)
 
     def core_file(folder: Path, version: str) -> None:
         folder.mkdir(parents=True)
